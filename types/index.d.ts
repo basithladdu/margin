@@ -1,4 +1,4 @@
-export type MarkColor = 'yellow' | 'green' | 'pink'
+export type MarkColor = 'yellow' | 'green' | 'pink' | 'blue' | 'orange'
 
 export type Highlight = {
   id: string
@@ -47,6 +47,11 @@ declare module 'claude-code' {
       view: PaneView
       /** Notebook shows every session's marks, not just this one's. */
       showAll: boolean
+      /** The row above the prompt is folded down to one button. */
+      hidden: boolean
+      /** Notebook search text and colour filter ('all' or a MarkColor). */
+      query: string
+      filter: string
     }
   }
 }

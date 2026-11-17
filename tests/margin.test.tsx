@@ -145,3 +145,60 @@ test('the sketch pad saves a drawing to the notebook', async ($, on) => {
   expect(await pane.find({ type: 'Svg' })).toBeDefined()
   await pane.unmount()
 })
+
+test('the row folds away and comes back, by button and by /margin', async ($, on) => {
+  engine(on)
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  await band.press({ key: 'hide' })
+  expect(await band.find({ key: 'hl-yellow' })).toBeUndefined()
+  await band.press({ key: 'show' })
+  expect(await band.find({ key: 'hl-yellow' })).toBeDefined()
+  await $.command.run({ command: 'margin', args: 'hide' } as never)
+  expect(await band.find({ key: 'show' })).toBeDefined()
+  await $.command.run({ command: 'margin', args: 'show' } as never)
+  expect(await band.find({ key: 'quote' })).toBeDefined()
+  await band.unmount()
+})
+
+test('quote puts the selection in the prompt; search filters the notebook', async ($, on) => {
+  engine(on)
+  let filled = ''
+  on('prompt.fill', (_, e) => {
+    filled = e.text
+    return { isFilled: true, text: e.text, cursor: e.text.length }
+  })
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  const r = await $.ui.mount(msg('desktop'))
+  await r.unmount()
+
+  selection = { text: 'one item', requestId: 'm1' }
+  const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  await band.press({ key: 'quote' })
+  expect(filled).toBe('> one item\n\n')
+  await band.press({ key: 'hl-blue' })
+  selection = { text: 'Last paragraph', requestId: 'm1' }
+  await band.press({ key: 'hl-orange' })
+  await band.press({ key: 'notebook' })
+  await band.unmount()
+
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await pane.findAll({ type: 'Button', text: /^Remove$/ })).toHaveLength(2)
+  await pane.input({ key: 'search', text: 'last', kind: 'change' })
+  expect(await pane.findAll({ type: 'Button', text: /^Remove$/ })).toHaveLength(1)
+  await pane.input({ key: 'search', text: '', kind: 'change' })
+  await pane.press({ key: 'f-blue' })
+  expect(await pane.findAll({ type: 'Button', text: /^Remove$/ })).toHaveLength(1)
+  await pane.unmount()
+})
+
+test('compact rows and a hidden start follow the settings', { options: { rowStyle: 'compact', startHidden: true } }, async ($, on) => {
+  engine(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await band.find({ key: 'show' })).toBeDefined()
+  await band.press({ key: 'show' })
+  expect(await band.find({ type: 'Button', text: /Mark read here/ })).toBeUndefined()
+  expect(await band.find({ key: 'mark' })).toBeDefined()
+  await band.unmount()
+})

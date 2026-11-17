@@ -15,14 +15,21 @@ const noting = atom({ plugin: 'margin', key: 'noting' } as const, null)
 const flash = atom({ plugin: 'margin', key: 'flash' } as const, null)
 const view = atom({ plugin: 'margin', key: 'view' } as const, 'notebook')
 const showAll = atom({ plugin: 'margin', key: 'showAll' } as const, false)
+const hidden = atom({ plugin: 'margin', key: 'hidden' } as const, false)
+const query = atom({ plugin: 'margin', key: 'query' } as const, '')
+const filter = atom({ plugin: 'margin', key: 'filter' } as const, 'all')
+const UI_KEY = 'margin-ui'
 
-const COLORS: Record<MarkColor, { bg: string; fg: string; label: string }> = {
-  yellow: { bg: '#fde68a', fg: '#1c1917', label: 'Yellow' },
-  green: { bg: '#bbf7d0', fg: '#1c1917', label: 'Green' },
-  pink: { bg: '#fbcfe8', fg: '#1c1917', label: 'Pink' },
+const COLORS: Record<MarkColor, { bg: string; fg: string; label: string; key: string }> = {
+  yellow: { bg: '#fde68a', fg: '#1c1917', label: 'Yellow', key: '1' },
+  green: { bg: '#bbf7d0', fg: '#1c1917', label: 'Green', key: '2' },
+  pink: { bg: '#fbcfe8', fg: '#1c1917', label: 'Pink', key: '3' },
+  blue: { bg: '#bfdbfe', fg: '#1c1917', label: 'Blue', key: '4' },
+  orange: { bg: '#fed7aa', fg: '#1c1917', label: 'Orange', key: '5' },
 }
+const COLOR_NAMES = Object.keys(COLORS) as MarkColor[]
 const MARKER_COLOR = '#d97706'
-const HINT = 'Select text in a reply, then pick a colour. Erase takes highlights off your selection.'
+const HINT = 'Select text in a reply, then pick a colour. Erase takes it off. Quote asks Claude about it. /margin hide folds this row away.'
 
 // What this run of the module has seen drawn: reply blocks in order. Rebuilt
 // as the transcript draws after a reload.
@@ -30,6 +37,8 @@ const texts = new Map<string, string>()
 const order: string[] = []
 const visible = new Set<string>()
 const here = { session: '', where: '', dir: '', isWindows: false, isMac: false }
+// The person's settings (userConfig in plugin.json), read at each load.
+const cfg = { folder: '', startHidden: false, compact: false, writeFiles: true }
 
 const seen = () => order.filter(id => texts.has(id)).map(id => ({ id, md: texts.get(id)! }))
 const markerHere = (d: MarksData) => d.markers.find(m => texts.has(m))
@@ -52,7 +61,7 @@ function normalize(v: unknown): MarksData | undefined {
 }
 
 async function writeNotebook($: EngineInterface, d: MarksData) {
-  if (!here.dir) return
+  if (!here.dir || !cfg.writeFiles) return
   try {
     await $.fs.write(`${here.dir}/index.html`, notebookHtml(d))
     await $.fs.write(`${here.dir}/notebook.md`, notebookMarkdown(d))
@@ -215,7 +224,38 @@ async function openFile($: EngineInterface, path: string) {
   }
 }
 
-export const register: Register = on => {
+async function setHidden($: EngineInterface, v: boolean) {
+  await update($, hidden, () => v)
+  await $.store.set(UI_KEY, { hidden: v })
+}
+
+async function quote($: EngineInterface) {
+  const sel = await $.ui.selection()
+  const text = sel?.text.trim() ?? ''
+  if (!text) return say($, 'Select text in a reply, then press Quote to ask Claude about it.')
+  const quoted = text.replace(/^/gm, '> ')
+  const r = await $.prompt.fill({ text: `${quoted}\n\n`, mode: 'insert' })
+  await say($, r.isFilled ? 'Quoted into your prompt. Type your question under it.' : "Couldn't reach the prompt box.")
+}
+
+function asMarkdown(list: readonly Highlight[]): string {
+  return list
+    .map(x => `> ${x.text.replace(/\n/g, '\n> ')}` + (x.note ? `\n\n${x.note}` : ''))
+    .join('\n\n---\n\n')
+}
+
+async function copyAll($: EngineInterface, list: readonly Highlight[]) {
+  if (list.length === 0) return say($, 'Nothing to copy yet.')
+  const r = await $.ui.copy({ text: asMarkdown(list) })
+  await say($, r.isCopied ? `Copied ${list.length} highlight${list.length > 1 ? 's' : ''} as Markdown.` : "Couldn't copy here. Open the notebook in your browser instead.")
+}
+
+export const register: Register = (on, options) => {
+  cfg.folder = typeof options.notebookFolder === 'string' ? options.notebookFolder.trim() : ''
+  cfg.startHidden = options.startHidden === true
+  cfg.compact = options.rowStyle === 'compact'
+  cfg.writeFiles = options.saveNotebook !== false
+
   on('session.start', async ($, e, next) => {
     const stored = normalize(await $.store.get(STORE_KEY))
     if (stored) await update($, data, () => stored)
@@ -225,14 +265,39 @@ export const register: Register = on => {
     const home = profile ?? (await $.env.get('HOME')) ?? ''
     here.isWindows = profile !== undefined
     here.isMac = !here.isWindows && home.startsWith('/Users/')
-    here.dir = home ? `${home.replace(/\\/g, '/')}/Documents/Margin Notebook` : ''
-    await $.command.register({ name: 'margin', description: 'Open your Margin notebook: highlights, notes, sketches' })
+    const fallback = home ? `${home.replace(/\\/g, '/')}/Documents/Margin Notebook` : ''
+    here.dir = cfg.folder ? cfg.folder.replace(/\\/g, '/') : fallback
+    const ui = (await $.store.get(UI_KEY)) as { hidden?: boolean } | undefined
+    await update($, hidden, () => (typeof ui?.hidden === 'boolean' ? ui.hidden : cfg.startHidden))
+    await $.command.register({
+      name: 'margin',
+      description: 'Margin: open the notebook, or hide/show the row above the prompt',
+      argumentHint: '[hide | show | sketch | resume]',
+    })
     return next(e)
   })
 
-  on('command.run', { command: 'margin' }, async $ => {
+  on('command.run', { command: 'margin' }, async ($, e) => {
+    const arg = e.args.trim().toLowerCase()
+    if (arg === 'hide' || arg === 'off') {
+      await setHidden($, true)
+      return { text: 'Margin row hidden. /margin show brings it back.' }
+    }
+    if (arg === 'show' || arg === 'on') {
+      await setHidden($, false)
+      return { text: 'Margin row is back above the prompt.' }
+    }
+    if (arg === 'toggle') {
+      const now = !(await read($, hidden))
+      await setHidden($, now)
+      return { text: now ? 'Margin row hidden.' : 'Margin row shown.' }
+    }
+    if (arg === 'sketch' || arg === 'resume') {
+      await openPane($, arg)
+      return { text: `Margin ${arg} opened.` }
+    }
     await openPane($, 'notebook')
-    return { text: 'Margin notebook opened.' }
+    return { text: 'Margin notebook opened. Also: /margin hide, /margin show, /margin sketch, /margin resume.' }
   })
 
   on('ui.message', async ($, e) => {
@@ -327,26 +392,37 @@ export const register: Register = on => {
     const mine = Object.values(d.highlights).flat().filter(isMine)
     const hasMarker = markerHere(d) !== undefined
     const open = mine.find(x => x.id === noteFor)
+    const small = cfg.compact
+
+    if (await read($, hidden)) {
+      return (
+        <Box flexDirection="row" alignItems="center" gap="sm">
+          <Button key="show" label="🖍 Margin" dimColor onPress={() => setHidden($, false)} />
+          {hasMarker && <Button key="resume" label="📍 Resume" dimColor onPress={() => resume($)} />}
+        </Box>
+      )
+    }
 
     return (
       <Box flexDirection="column" gap="xs">
         <Box flexDirection="row" flexWrap="wrap" alignItems="center" gap="sm">
-          {(Object.keys(COLORS) as MarkColor[]).map(c => (
-            <Button key={`hl-${c}`} onPress={() => highlight($, c)}>
+          {COLOR_NAMES.map(c => (
+            <Button key={`hl-${c}`} hotkey={COLORS[c].key} onPress={() => highlight($, c)}>
               <Text backgroundColor={COLORS[c].bg} color={COLORS[c].fg}>
-                {' '}
-                {COLORS[c].label}{' '}
+                {small ? '   ' : ` ${COLORS[c].label} `}
               </Text>
             </Button>
           ))}
-          <Button key="erase" label="Erase" dimColor onPress={() => erase($)} />
+          <Button key="erase" hotkey="e" label={small ? '⌫' : 'Erase'} dimColor onPress={() => erase($)} />
           <Text dimColor>│</Text>
-          <Button key="mark" label="📍 Mark read here" onPress={() => markHere($)} />
-          {hasMarker && <Button key="resume" label="Resume" onPress={() => resume($)} />}
-          {hasMarker && <Button key="unmark" label="Clear mark" dimColor onPress={() => clearMark($)} />}
+          <Button key="mark" hotkey="m" label={small ? '📍' : '📍 Mark read here'} onPress={() => markHere($)} />
+          {hasMarker && <Button key="resume" hotkey="r" label={small ? '↩' : 'Resume'} onPress={() => resume($)} />}
+          {hasMarker && <Button key="unmark" label={small ? '✕📍' : 'Clear mark'} dimColor onPress={() => clearMark($)} />}
           <Text dimColor>│</Text>
-          <Button key="notebook" label={`📓 Notebook${mine.length ? ` (${mine.length})` : ''}`} onPress={() => openPane($, 'notebook')} />
-          <Button key="sketch" label="✏️ Sketch" onPress={() => openPane($, 'sketch')} />
+          <Button key="quote" hotkey="q" label={small ? '❝' : '❝ Quote'} onPress={() => quote($)} />
+          <Button key="notebook" hotkey="n" label={`📓${small ? '' : ' Notebook'}${mine.length ? ` (${mine.length})` : ''}`} onPress={() => openPane($, 'notebook')} />
+          <Button key="sketch" hotkey="s" label={small ? '✏️' : '✏️ Sketch'} onPress={() => openPane($, 'sketch')} />
+          <Button key="hide" label="Hide Margin" role="dismiss" dimColor onPress={() => setHidden($, true)} />
         </Box>
         {open && (
           <Box flexDirection="row" alignItems="center" gap="sm">
@@ -440,21 +516,44 @@ export const register: Register = on => {
       )
     }
 
+    const q = (await read($, query)).trim().toLowerCase()
+    const only = await read($, filter)
     const list = Object.values(d.highlights)
       .flat()
       .filter(x => all || isMine(x))
+      .filter(x => only === 'all' || x.color === only)
+      .filter(x => !q || (x.text + ' ' + (x.note ?? '')).toLowerCase().includes(q))
       .sort((a, b) => (all ? b.at - a.at : order.indexOf(a.requestId) - order.indexOf(b.requestId) || a.at - b.at))
     const sketches = d.sketches.filter(s => all || s.session === here.session).sort((a, b) => b.at - a.at)
     const Svg = e.surface === 'terminal' ? undefined : $.ui.resolve(e).Svg
     const canSvg = Svg !== undefined
+    const { Input } = $.ui.resolve(e)
 
     return (
       <Box flexDirection="column" gap="sm">
         {tabs}
+        <Input
+          key="search"
+          placeholder="Search highlights and notes"
+          value={q}
+          onInput={v => update($, query, () => v)}
+          onSubmit={v => update($, query, () => v)}
+        />
+        <Box flexDirection="row" gap="xs" flexWrap="wrap" alignItems="center">
+          <Button key="f-all" label="All" variant={only === 'all' ? 'primary' : 'secondary'} onPress={() => update($, filter, () => 'all')} />
+          {COLOR_NAMES.map(c => (
+            <Button key={`f-${c}`} onPress={() => update($, filter, x => (x === c ? 'all' : c))}>
+              <Text backgroundColor={COLORS[c].bg} color={COLORS[c].fg}>
+                {only === c ? ` ✓ ${COLORS[c].label} ` : ` ${COLORS[c].label} `}
+              </Text>
+            </Button>
+          ))}
+        </Box>
         <Box flexDirection="row" gap="sm" flexWrap="wrap">
           <Button key="scope" label={all ? 'Showing: all sessions' : 'Showing: this session'} dimColor onPress={() => update($, showAll, x => !x)} />
-          {here.dir && <Button key="open-html" label="Open in browser" dimColor onPress={() => openFile($, `${here.dir}/index.html`)} />}
-          {here.dir && <Button key="open-dir" label="Open folder" dimColor onPress={() => openFile($, here.dir)} />}
+          <Button key="copy-md" label="Copy as Markdown" dimColor onPress={() => copyAll($, list)} />
+          {here.dir && cfg.writeFiles && <Button key="open-html" label="Open in browser" dimColor onPress={() => openFile($, `${here.dir}/index.html`)} />}
+          {here.dir && cfg.writeFiles && <Button key="open-dir" label="Open folder" dimColor onPress={() => openFile($, here.dir)} />}
         </Box>
         {m && (
           <Text color={MARKER_COLOR}>📍 Marker on: {firstLine(texts.get(m) ?? '', width - 12)}</Text>

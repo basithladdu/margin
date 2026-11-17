@@ -16,7 +16,7 @@
 :root{
   --paper:#faf6ec;--ink:#1c1917;--dim:#78716c;--line:#e7dfcc;--card:#fffdf8;
   --app:#1f1d1a;--app2:#2a2723;--appline:#3a362f;--apptext:#ece7dc;--appdim:#a39d92;
-  --y:#fde68a;--g:#bbf7d0;--p:#fbcfe8;--pin:#ea580c;--green:#16a34a;
+  --y:#fde68a;--g:#bbf7d0;--p:#fbcfe8;--b:#bfdbfe;--o:#fed7aa;--pin:#ea580c;--green:#16a34a;
 }
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
@@ -56,7 +56,7 @@ nav a:hover{color:var(--ink)}
 .reply code{font:13px 'JetBrains Mono',monospace;background:#34302a;border-radius:4px;padding:1px 5px}
 .reply ul{margin:0 0 12px;padding-left:22px}
 .reply mark{color:#1c1917;border-radius:3px;padding:1px 0;box-decoration-break:clone;-webkit-box-decoration-break:clone;cursor:pointer}
-.reply mark.yellow{background:var(--y)}.reply mark.green{background:var(--g)}.reply mark.pink{background:var(--p)}
+.reply mark.yellow{background:var(--y)}.reply mark.green{background:var(--g)}.reply mark.pink{background:var(--p)}.reply mark.blue{background:var(--b)}.reply mark.orange{background:var(--o)}
 .note{display:block;font-size:13px;font-style:italic;color:var(--appdim);margin:-6px 0 12px}
 .note:before{content:'✎ '}
 .stop{color:#f59e0b;font-weight:600;font-size:14px;display:flex;align-items:center;gap:10px;margin:2px 0 14px}
@@ -67,6 +67,7 @@ nav a:hover{color:var(--ink)}
 .band button:hover,.pane button:hover{border-color:#5d574d}
 .band .chip{color:#1c1917;border:0;font-weight:600}
 .band .sep{color:var(--appline)}
+.band[hidden],.hint[hidden]{display:none}
 .hint{font-size:12.5px;color:var(--appdim);padding:2px 18px 6px;margin:0 -26px;min-height:26px}
 .noteform{display:none;gap:6px;padding:4px 18px 8px;margin:0 -26px}
 .noteform.on{display:flex}
@@ -127,7 +128,7 @@ footer a{color:var(--ink)}
 
 <div class="wrap hero">
   <h1>Claude writes a lot.<br><mark>Mark what matters.</mark></h1>
-  <p>Margin is a free mod for Claude Code. Highlight replies in three colours, pin a note to a highlight, drop a "read up to here" marker, sketch an idea, and find it all again in your notebook.</p>
+  <p>Margin is a free mod for Claude Code. Highlight replies in five colours, pin a note to a highlight, drop a "read up to here" marker, sketch an idea, and find it all again in your notebook.</p>
   <div class="cta">
     <a class="btn solid" href="#install">Install in a minute</a>
     <a class="btn" href="https://github.com/basithladdu/margin">★ Source on GitHub</a>
@@ -157,16 +158,21 @@ footer a{color:var(--ink)}
         <button class="chip" style="background:var(--y)" data-c="yellow">Yellow</button>
         <button class="chip" style="background:var(--g)" data-c="green">Green</button>
         <button class="chip" style="background:var(--p)" data-c="pink">Pink</button>
+        <button class="chip" style="background:var(--b)" data-c="blue">Blue</button>
+        <button class="chip" style="background:var(--o)" data-c="orange">Orange</button>
         <button id="erase">Erase</button>
         <span class="sep">│</span>
         <button id="mark">📍 Mark read here</button>
         <span class="sep">│</span>
+        <button id="quote">❝ Quote</button>
         <button id="nb">📓 Notebook</button>
         <button id="sk">✏️ Sketch</button>
+        <button id="hide" title="Hide Margin" aria-label="Hide Margin">✕</button>
       </div>
+      <div class="band" id="folded" hidden><button id="unfold">🖍 Margin</button></div>
       <div class="noteform" id="noteform"><input id="noteinput" placeholder="Add a note (Enter to save)"><button id="noteskip">Skip</button></div>
       <div class="hint" id="hint">Select text in a reply, then pick a colour. Erase takes highlights off your selection.</div>
-      <div class="prompt">Reply to Claude…</div>
+      <div class="prompt" id="prompt">Reply to Claude…</div>
     </div>
     <aside class="pane" id="pane" hidden>
       <h4><span>Margin</span><button id="closepane" aria-label="Close">✕</button></h4>
@@ -185,11 +191,13 @@ footer a{color:var(--ink)}
     <h2>Read long replies without losing the thread</h2>
     <p class="lead">Claude's answers are good and long. Margin gives you a pen and a bookmark, right in the app.</p>
     <div class="grid3">
-      <div class="card"><span class="ic">🖍️</span><h3>Highlight in colour</h3><p>Yellow, green, pink. Select, press, done. Press it again or use Erase to take it off.</p></div>
+      <div class="card"><span class="ic">🖍️</span><h3>Highlight in colour</h3><p>Five colours, keys 1 to 5. Select, press, done. Press it again or use Erase to take it off.</p></div>
       <div class="card"><span class="ic">✎</span><h3>Notes on the side</h3><p>Pin a one-line note to any highlight. It shows under the paragraph and in your notebook.</p></div>
       <div class="card"><span class="ic">📍</span><h3>Read up to here</h3><p>Drop a marker where you stopped. Resume shows everything after it. Clear it when you're done.</p></div>
       <div class="card"><span class="ic">✏️</span><h3>Sketch an idea</h3><p>A small sketch pad in the side pane. Strokes are smoothed into clean SVGs with <a href="https://github.com/steveruizok/perfect-freehand">perfect-freehand</a>.</p></div>
       <div class="card"><span class="ic">📓</span><h3>A notebook you can browse</h3><p>Every highlight, note and sketch lands in <code>Documents/Margin Notebook</code>: a searchable page plus Markdown for Obsidian or Logseq.</p></div>
+      <div class="card"><span class="ic">❝</span><h3>Quote it back</h3><p>Select a line Claude wrote and press Quote. It lands in your prompt so you can ask about exactly that.</p></div>
+      <div class="card"><span class="ic">🙈</span><h3>Out of the way</h3><p>Hide the row with one click or <code>/margin hide</code>. A compact icon-only style and a start-hidden option are in settings.</p></div>
       <div class="card"><span class="ic">🔒</span><h3>Yours, on your machine</h3><p>No account, no server, no tracking. It's a few files on your computer and you can read every line.</p></div>
     </div>
   </div>
@@ -342,6 +350,15 @@ document.querySelectorAll('.band .chip').forEach(b => b.addEventListener('moused
 document.querySelectorAll('.band button').forEach(b => b.addEventListener('mousedown', e => e.preventDefault()))
 document.querySelectorAll('.band .chip').forEach(b => b.onclick = () => highlight(b.dataset.c))
 $('#erase').onclick = erase
+$('#quote').onclick = () => {
+  const r = sel()
+  if (!r) return say('Select text in the reply, then press Quote to ask Claude about it.')
+  const p = $('#prompt'); p.style.color = 'var(--apptext)'; p.style.whiteSpace = 'pre-wrap'
+  p.textContent = r.toString().trim().replace(/^/gm, '> ') + '\n\nwhat do you mean here?'
+  window.getSelection().removeAllRanges(); say('Quoted into your prompt. Type your question under it.')
+}
+$('#hide').onclick = () => { $('#band').hidden = true; $('#hint').hidden = true; $('#folded').hidden = false }
+$('#unfold').onclick = () => { $('#band').hidden = false; $('#hint').hidden = false; $('#folded').hidden = true }
 $('#mark').onclick = mark
 $('#nb').onclick = () => openPane('notebook')
 $('#sk').onclick = () => openPane('sketch')

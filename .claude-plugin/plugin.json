@@ -1,8 +1,41 @@
 {
   "name": "margin",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Highlight Claude's replies in colour, add notes, keep a 'read up to here' marker, sketch, and browse it all in a notebook.",
-  "author": { "name": "basithladdu", "url": "https://github.com/basithladdu" },
+  "author": {
+    "name": "basithladdu",
+    "url": "https://github.com/basithladdu"
+  },
   "license": "MIT",
-  "types": "./types/index.d.ts"
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "notebookFolder": {
+      "type": "string",
+      "title": "Notebook folder",
+      "description": "Where the notebook files go. Empty means Documents/Margin Notebook.",
+      "default": ""
+    },
+    "saveNotebook": {
+      "type": "boolean",
+      "title": "Write notebook files",
+      "description": "Keep an HTML and Markdown copy of your highlights in the notebook folder.",
+      "default": true
+    },
+    "startHidden": {
+      "type": "boolean",
+      "title": "Start with the row hidden",
+      "description": "Show only a small Margin button above the prompt until you open it.",
+      "default": false
+    },
+    "rowStyle": {
+      "type": "string",
+      "title": "Row style",
+      "description": "full shows words on the buttons, compact shows icons only.",
+      "options": [
+        "full",
+        "compact"
+      ],
+      "default": "full"
+    }
+  }
 }

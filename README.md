@@ -8,11 +8,13 @@
 
 Long replies are great until you lose your place, or can't find the one line that mattered. Margin adds a pen and a bookmark to Claude Code:
 
-- **Highlight** any part of a reply in yellow, green or pink.
+- **Highlight** any part of a reply in yellow, green, pink, blue or orange.
 - **Pin a note** to a highlight. It shows under the paragraph.
 - **📍 Mark read here** drops a marker where you stopped. **Resume** shows everything after it. **Clear** takes it off.
 - **✏️ Sketch** a quick idea in the side pane. Strokes are smoothed into clean SVGs with [perfect-freehand](https://github.com/steveruizok/perfect-freehand).
-- **📓 Notebook** keeps it all, per session or across every session, and writes a page you can browse and search.
+- **❝ Quote** drops what you selected into the prompt, so you can ask Claude about exactly that.
+- **📓 Notebook** keeps it all, per session or across every session. Search it, filter by colour, copy it as Markdown, and browse it as a web page.
+- **Hide it** when you don't need it. The row folds down to one small button.
 
 Works in the **Claude desktop app (Code tab)** and in **the terminal**. Everything stays on your computer.
 
@@ -39,14 +41,27 @@ Start a new session (in the desktop app too). The Margin row shows up above the 
 
 | You want to | Do this |
 |---|---|
-| Highlight | Select text in a reply, press **Yellow**, **Green** or **Pink** |
+| Highlight | Select text in a reply, press a colour (keys `1` to `5` while the row has focus) |
 | Add a note | After highlighting, type in the **Note** field and press Enter |
 | Remove a highlight | Select it and press **Erase**, press the same colour again, or **Remove** in the notebook |
 | Mark where you stopped | Select a word in the reply you stopped at, press **📍 Mark read here** |
 | Pick up again | **Resume** shows the replies after your marker |
 | Remove the marker | **Clear** on the marker line, or **Clear mark** above the prompt |
-| See everything | **📓 Notebook**, or type `/margin` |
+| Ask Claude about a bit | Select it, press **❝ Quote**, type your question |
+| See everything | **📓 Notebook**, or type `/margin`. Search, filter by colour, **Copy as Markdown** |
+| Hide the row | The **✕** at the end of the row, or `/margin hide`. Bring it back with **🖍 Margin** or `/margin show` |
 | Draw | **✏️ Sketch**, drag inside the box, **Save to notebook** |
+
+## Settings
+
+Change these in Claude Code's config (`/config`, or `pluginConfigs` in `~/.claude/settings.json`):
+
+| Setting | What it does | Default |
+|---|---|---|
+| `rowStyle` | `full` shows words on the buttons, `compact` shows icons only | `full` |
+| `startHidden` | Start with the row folded into one small button | off |
+| `notebookFolder` | Where the notebook files go | `Documents/Margin Notebook` |
+| `saveNotebook` | Write the HTML and Markdown notebook at all | on |
 
 ## Where your stuff lives
 

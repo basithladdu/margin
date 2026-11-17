@@ -77,7 +77,7 @@ export function notebookHtml(d: MarksData): string {
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Margin notebook</title>
 <style>
-:root{--bg:#faf8f3;--fg:#1c1917;--dim:#78716c;--card:#fff;--line:#e7e2d6;--y:#fde68a;--g:#bbf7d0;--p:#fbcfe8}
+:root{--bg:#faf8f3;--fg:#1c1917;--dim:#78716c;--card:#fff;--line:#e7e2d6;--y:#fde68a;--g:#bbf7d0;--p:#fbcfe8;--b:#bfdbfe;--o:#fed7aa}
 @media (prefers-color-scheme:dark){:root{--bg:#1a1917;--fg:#f5f2ea;--dim:#a8a29e;--card:#24221f;--line:#36332e}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 Georgia,'Iowan Old Style',serif}
 header{max-width:960px;margin:0 auto;padding:40px 16px 8px}h1{font-size:34px;margin:0}header p{color:var(--dim);margin:4px 0 16px;font-family:system-ui,sans-serif;font-size:14px}
@@ -86,7 +86,7 @@ main{max-width:960px;margin:0 auto;padding:8px 16px 64px}h2{font:600 18px system
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:0}
 .quote{margin:0}mark{color:#1c1917;padding:1px 3px;border-radius:3px;box-decoration-break:clone;-webkit-box-decoration-break:clone}
-mark.yellow{background:var(--y)}mark.green{background:var(--g)}mark.pink{background:var(--p)}
+mark.yellow{background:var(--y)}mark.green{background:var(--g)}mark.pink{background:var(--p)}mark.blue{background:var(--b)}mark.orange{background:var(--o)}
 .note{margin:10px 0 0;padding-left:10px;border-left:3px solid var(--line);font-style:italic}
 .meta{margin:8px 0 0;color:var(--dim);font:12px system-ui,sans-serif}.sketch svg{width:100%;height:auto;color:var(--fg)}
 .empty{color:var(--dim);font-family:system-ui,sans-serif}
