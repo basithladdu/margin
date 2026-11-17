@@ -1,0 +1,7 @@
+# margin.wedevit.in - a static page served by a Cloudflare Worker (assets only, no code)
+name = "margin-site"
+compatibility_date = "2025-06-01"
+routes = [{ pattern = "margin.wedevit.in", custom_domain = true }]
+
+[assets]
+directory = "./public"

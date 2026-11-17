@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Margin · a highlighter for Claude Code</title>
+<meta name="description" content="Highlight Claude's replies in colour, add notes, keep a 'read up to here' marker, and sketch. A free, open-source mod for Claude Code.">
+<meta property="og:title" content="Margin · a highlighter for Claude Code">
+<meta property="og:description" content="Highlight Claude's replies, add notes, keep your place, sketch. Free and open source.">
+<meta property="og:image" content="https://margin.wedevit.in/og.png">
+<link rel="icon" href="logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#faf6ec;--ink:#1c1917;--dim:#78716c;--line:#e7dfcc;--card:#fffdf8;
+  --app:#1f1d1a;--app2:#2a2723;--appline:#3a362f;--apptext:#ece7dc;--appdim:#a39d92;
+  --y:#fde68a;--g:#bbf7d0;--p:#fbcfe8;--pin:#ea580c;--green:#16a34a;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.6 Inter,system-ui,sans-serif;overflow-x:hidden}
+a{color:inherit}
+.wrap{max-width:1080px;margin:0 auto;padding:0 16px}
+header{padding:28px 0 0}
+nav{display:flex;align-items:center;gap:12px}
+nav img{width:36px;height:36px}
+nav b{font:700 20px Fraunces,Georgia,serif}
+nav .sp{flex:1}
+nav a{text-decoration:none;color:var(--dim);font-weight:500;font-size:15px}
+nav a:hover{color:var(--ink)}
+.hero{padding:56px 0 28px;text-align:center}
+.hero h1{font:700 clamp(38px,7vw,72px)/1.05 Fraunces,Georgia,serif;margin:0 0 18px;letter-spacing:-.02em}
+.hero h1 mark{background:linear-gradient(transparent 12%,var(--y) 12%,var(--y) 88%,transparent 88%);color:inherit;padding:0 .08em}
+.hero p{font-size:clamp(17px,2.2vw,20px);color:#44403c;max-width:640px;margin:0 auto 26px}
+.cta{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:12px 20px;border-radius:999px;font-weight:600;text-decoration:none;border:1.5px solid var(--ink);font-size:15px}
+.btn.solid{background:var(--ink);color:var(--paper)}
+.btn:hover{transform:translateY(-1px)}
+.small{font-size:13px;color:var(--dim);margin-top:12px}
+
+/* the demo app window */
+.demo{margin:36px auto 0;max-width:980px}
+.try{font:500 15px Inter;color:var(--dim);text-align:center;margin:0 0 12px}
+.try span{background:var(--ink);color:var(--paper);border-radius:999px;padding:2px 10px;font-size:12px;margin-right:6px}
+.win{background:var(--app);color:var(--apptext);border-radius:16px;box-shadow:0 30px 80px -30px rgba(28,25,23,.55),0 0 0 1px rgba(0,0,0,.2);overflow:hidden;display:grid;grid-template-columns:1fr 0}
+.win.paneopen{grid-template-columns:1fr 330px}
+.bar{display:flex;gap:7px;padding:12px 14px;border-bottom:1px solid var(--appline);grid-column:1/-1}
+.bar i{width:11px;height:11px;border-radius:50%;background:#4a453d}
+.bar em{font:12px Inter;color:var(--appdim);margin-left:10px;font-style:normal}
+.chat{padding:22px 26px 0;min-width:0;display:flex;flex-direction:column}
+.you{align-self:flex-end;background:var(--app2);border-radius:12px;padding:8px 14px;font-size:14px;margin-bottom:16px;max-width:80%}
+.reply{font:15.5px/1.7 Inter;color:var(--apptext)}
+.reply p{margin:0 0 12px}
+.reply code{font:13px 'JetBrains Mono',monospace;background:#34302a;border-radius:4px;padding:1px 5px}
+.reply ul{margin:0 0 12px;padding-left:22px}
+.reply mark{color:#1c1917;border-radius:3px;padding:1px 0;box-decoration-break:clone;-webkit-box-decoration-break:clone;cursor:pointer}
+.reply mark.yellow{background:var(--y)}.reply mark.green{background:var(--g)}.reply mark.pink{background:var(--p)}
+.note{display:block;font-size:13px;font-style:italic;color:var(--appdim);margin:-6px 0 12px}
+.note:before{content:'✎ '}
+.stop{color:#f59e0b;font-weight:600;font-size:14px;display:flex;align-items:center;gap:10px;margin:2px 0 14px}
+.stop:before,.stop:after{content:'';height:1px;background:#f59e0b;opacity:.6;flex:1}
+.stop button{background:none;border:1px solid var(--appline);color:var(--appdim);border-radius:6px;font-size:12px;padding:2px 8px;cursor:pointer}
+.band{border-top:1px solid var(--appline);margin:8px -26px 0;padding:10px 18px 4px;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.band button,.pane button{font:500 13px Inter;border-radius:7px;border:1px solid var(--appline);background:var(--app2);color:var(--apptext);padding:5px 10px;cursor:pointer}
+.band button:hover,.pane button:hover{border-color:#5d574d}
+.band .chip{color:#1c1917;border:0;font-weight:600}
+.band .sep{color:var(--appline)}
+.hint{font-size:12.5px;color:var(--appdim);padding:2px 18px 6px;margin:0 -26px;min-height:26px}
+.noteform{display:none;gap:6px;padding:4px 18px 8px;margin:0 -26px}
+.noteform.on{display:flex}
+.noteform input{flex:1;min-width:0;background:var(--app2);border:1px solid var(--appline);border-radius:7px;color:var(--apptext);padding:6px 10px;font:13px Inter}
+.prompt{margin:6px -10px 16px;background:var(--app2);border:1px solid var(--appline);border-radius:12px;padding:12px 14px;color:var(--appdim);font-size:14px}
+.pane{border-left:1px solid var(--appline);padding:16px;overflow:auto;max-height:640px;min-width:0}
+.pane h4{margin:0 0 10px;font:600 14px Inter;display:flex;justify-content:space-between;align-items:center}
+.tabs{display:flex;gap:6px;margin-bottom:12px}
+.tabs button.on{background:#ece7dc;color:#1c1917}
+.item{border-bottom:1px solid var(--appline);padding:10px 0;font-size:13.5px}
+.item mark{color:#1c1917;border-radius:3px;padding:0 2px}
+.item .n{font-style:italic;color:var(--appdim);display:block;margin-top:4px}
+.item .acts{margin-top:6px;display:flex;gap:6px}
+.item .acts button{font-size:12px;padding:2px 8px}
+.empty{color:var(--appdim);font-size:13.5px}
+canvas{width:100%;height:240px;background:#fffdf8;border-radius:10px;touch-action:none;cursor:crosshair;display:block}
+.sketches svg{width:100%;height:auto;background:#fffdf8;border-radius:8px;margin-top:8px}
+
+section{padding:72px 0 0}
+section h2{font:700 clamp(28px,4vw,40px)/1.15 Fraunces,Georgia,serif;margin:0 0 10px;letter-spacing:-.01em}
+section > .wrap > p.lead{color:#44403c;margin:0 0 28px;max-width:640px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px}
+.card h3{margin:0 0 6px;font:600 17px Inter}
+.card p{margin:0;color:#57534e;font-size:15px}
+.card .ic{font-size:22px;margin-bottom:8px;display:block}
+.steps{counter-reset:s;display:grid;grid-template-columns:minmax(0,1fr);gap:14px;max-width:760px}
+.step{min-width:0}
+.step{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px 18px 62px;position:relative}
+.step:before{counter-increment:s;content:counter(s);position:absolute;left:18px;top:16px;width:30px;height:30px;border-radius:50%;background:var(--ink);color:var(--paper);display:grid;place-items:center;font-weight:600;font-size:14px}
+.step b{display:block;margin-bottom:4px}
+pre{margin:8px 0 0;background:#1f1d1a;color:#ece7dc;border-radius:10px;padding:12px 14px;font:13.5px/1.5 'JetBrains Mono',monospace;overflow-x:auto;position:relative}
+pre button{position:absolute;right:8px;top:8px;background:#3a362f;color:#ece7dc;border:0;border-radius:6px;font:12px Inter;padding:3px 9px;cursor:pointer}
+.honest li{margin-bottom:8px}
+footer{padding:80px 0 40px;color:var(--dim);font-size:14px;text-align:center}
+footer a{color:var(--ink)}
+@media (max-width:820px){
+  .win,.win.paneopen{grid-template-columns:1fr}
+  .pane{border-left:0;border-top:1px solid var(--appline);max-height:none}
+  .grid3{grid-template-columns:1fr}
+  .chat{padding:18px 16px 0}
+  .step{padding:16px 14px 16px 54px}.step:before{left:14px}
+  pre{padding-top:38px}
+  .band,.hint,.noteform{margin-left:-16px;margin-right:-16px}
+}
+</style>
+</head>
+<body>
+<header class="wrap">
+  <nav>
+    <img src="logo.png" alt="">
+    <b>Margin</b>
+    <span class="sp"></span>
+    <a href="#install">Install</a>
+    <a href="https://github.com/basithladdu/margin">GitHub</a>
+  </nav>
+</header>
+
+<div class="wrap hero">
+  <h1>Claude writes a lot.<br><mark>Mark what matters.</mark></h1>
+  <p>Margin is a free mod for Claude Code. Highlight replies in three colours, pin a note to a highlight, drop a "read up to here" marker, sketch an idea, and find it all again in your notebook.</p>
+  <div class="cta">
+    <a class="btn solid" href="#install">Install in a minute</a>
+    <a class="btn" href="https://github.com/basithladdu/margin">★ Source on GitHub</a>
+  </div>
+  <p class="small">Works in the Claude desktop app (Code tab) and the terminal · Everything stays on your computer · MIT</p>
+</div>
+
+<div class="wrap demo">
+  <p class="try"><span>Try it</span>Select any words in the reply below, then press a colour.</p>
+  <div class="win" id="win">
+    <div class="bar"><i></i><i></i><i></i><em>Claude Code · my-app</em></div>
+    <div class="chat">
+      <div class="you">why does the login page sometimes log me out?</div>
+      <div class="reply" id="reply">
+        <p>Short answer: your session cookie and your access token expire at different times, and the page only checks one of them.</p>
+        <p>Here's what happens. When you sign in, the server sets a cookie that lives for <code>7 days</code>, but the access token inside it lives for only <code>15 minutes</code>. The refresh call that should swap in a new token runs only when you navigate, so a tab left open for a while ends up holding a dead token.</p>
+        <p>The next request fails with a 401, and the error handler treats every 401 as "signed out". That's the logout you're seeing.</p>
+        <p>Three ways to fix it, from smallest to sturdiest:</p>
+        <ul>
+          <li>Refresh the token on a timer, a minute before it expires.</li>
+          <li>Retry once on a 401 after refreshing, before giving up.</li>
+          <li>Move the refresh into the API client so every call is covered.</li>
+        </ul>
+        <p>I'd go with the third. It's about twenty lines in <code>api.ts</code> and it covers the cases the other two miss, like a laptop waking from sleep.</p>
+      </div>
+      <div class="band" id="band">
+        <button class="chip" style="background:var(--y)" data-c="yellow">Yellow</button>
+        <button class="chip" style="background:var(--g)" data-c="green">Green</button>
+        <button class="chip" style="background:var(--p)" data-c="pink">Pink</button>
+        <button id="erase">Erase</button>
+        <span class="sep">│</span>
+        <button id="mark">📍 Mark read here</button>
+        <span class="sep">│</span>
+        <button id="nb">📓 Notebook</button>
+        <button id="sk">✏️ Sketch</button>
+      </div>
+      <div class="noteform" id="noteform"><input id="noteinput" placeholder="Add a note (Enter to save)"><button id="noteskip">Skip</button></div>
+      <div class="hint" id="hint">Select text in a reply, then pick a colour. Erase takes highlights off your selection.</div>
+      <div class="prompt">Reply to Claude…</div>
+    </div>
+    <aside class="pane" id="pane" hidden>
+      <h4><span>Margin</span><button id="closepane" aria-label="Close">✕</button></h4>
+      <div class="tabs"><button data-t="notebook" class="on">📓 Notebook</button><button data-t="sketch">✏️ Sketch</button></div>
+      <div id="tab-notebook"></div>
+      <div id="tab-sketch" hidden>
+        <canvas id="pad"></canvas>
+        <div style="display:flex;gap:6px;margin-top:8px"><button id="padsave">Save to notebook</button><button id="padundo">Undo</button><button id="padclear">Clear</button></div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<section>
+  <div class="wrap">
+    <h2>Read long replies without losing the thread</h2>
+    <p class="lead">Claude's answers are good and long. Margin gives you a pen and a bookmark, right in the app.</p>
+    <div class="grid3">
+      <div class="card"><span class="ic">🖍️</span><h3>Highlight in colour</h3><p>Yellow, green, pink. Select, press, done. Press it again or use Erase to take it off.</p></div>
+      <div class="card"><span class="ic">✎</span><h3>Notes on the side</h3><p>Pin a one-line note to any highlight. It shows under the paragraph and in your notebook.</p></div>
+      <div class="card"><span class="ic">📍</span><h3>Read up to here</h3><p>Drop a marker where you stopped. Resume shows everything after it. Clear it when you're done.</p></div>
+      <div class="card"><span class="ic">✏️</span><h3>Sketch an idea</h3><p>A small sketch pad in the side pane. Strokes are smoothed into clean SVGs with <a href="https://github.com/steveruizok/perfect-freehand">perfect-freehand</a>.</p></div>
+      <div class="card"><span class="ic">📓</span><h3>A notebook you can browse</h3><p>Every highlight, note and sketch lands in <code>Documents/Margin Notebook</code>: a searchable page plus Markdown for Obsidian or Logseq.</p></div>
+      <div class="card"><span class="ic">🔒</span><h3>Yours, on your machine</h3><p>No account, no server, no tracking. It's a few files on your computer and you can read every line.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="install">
+  <div class="wrap">
+    <h2>Install</h2>
+    <p class="lead">You need Claude Code (the desktop app's Code tab or the terminal). Then:</p>
+    <div class="steps">
+      <div class="step"><b>In a terminal, add the marketplace and install</b>
+        <pre><code>claude plugin marketplace add basithladdu/margin
+claude plugin install margin@margin</code><button>Copy</button></pre></div>
+      <div class="step"><b>Or from inside Claude Code</b>Type this at the prompt in a terminal session, say <b>y</b>, then pick a scope:
+        <pre><code>/plugin install margin --marketplace basithladdu/margin</code><button>Copy</button></pre></div>
+      <div class="step"><b>Start a new session</b>The Margin row appears above the prompt. Select text in a reply and press a colour. Type <code>/margin</code> to open your notebook.</div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>The honest list</h2>
+    <ul class="honest">
+      <li>A paragraph with a highlight in it is redrawn by Margin, so bold and inline code in <i>that paragraph</i> show as plain text. Everything else looks exactly as Claude wrote it.</li>
+      <li>The desktop app doesn't let mods scroll the conversation, so Resume opens the rest of your reading in the side pane instead of jumping.</li>
+      <li>Mods are a new part of Claude Code. If an update changes them, Margin may need an update too.</li>
+      <li>Highlights belong to the computer you made them on. Back up <code>Documents/Margin Notebook</code> if you care about them.</li>
+    </ul>
+  </div>
+</section>
+
+<footer class="wrap">
+  <p>Margin is free and open source under the MIT License. Made by <a href="https://github.com/basithladdu">@basithladdu</a>.</p>
+  <p>Also by us: <a href="https://duoseat.wedevit.in">DuoSeat</a>, two cursors on one Windows PC.</p>
+</footer>
+
+<script type="module">
+import { getStroke } from 'https://cdn.jsdelivr.net/npm/perfect-freehand@1.2.2/+esm'
+
+const $ = s => document.querySelector(s)
+const reply = $('#reply'), hint = $('#hint'), win = $('#win'), pane = $('#pane')
+const notes = new Map()  // highlight id -> note
+let lastId = null, seq = 0, saved = null
+
+const say = t => { hint.textContent = t }
+const sel = () => {
+  const s = window.getSelection()
+  if (!s || s.isCollapsed || !s.rangeCount) return null
+  const r = s.getRangeAt(0)
+  return reply.contains(r.commonAncestorContainer) ? r : null
+}
+
+function textNodesIn(range) {
+  const out = []
+  const walk = document.createTreeWalker(reply, NodeFilter.SHOW_TEXT)
+  while (walk.nextNode()) {
+    const n = walk.currentNode
+    if (range.intersectsNode(n) && n.textContent.trim() && !n.parentElement.closest('.note,.stop')) out.push(n)
+  }
+  return out
+}
+
+function highlight(color) {
+  const r = sel()
+  if (!r) return say('Select some words in the reply first, then pick a colour.')
+  const id = 'h' + (++seq)
+  for (const n of textNodesIn(r)) {
+    let start = n === r.startContainer ? r.startOffset : 0
+    let end = n === r.endContainer ? r.endOffset : n.length
+    if (end <= start) continue
+    const part = n.splitText(start)
+    part.splitText(end - start)
+    const m = document.createElement('mark')
+    m.className = color; m.dataset.id = id
+    part.replaceWith(m); m.append(part)
+  }
+  window.getSelection().removeAllRanges()
+  lastId = id
+  $('#noteform').classList.add('on'); $('#noteinput').value = ''; $('#noteinput').focus()
+  say('Highlighted. Add a note, or just keep reading.')
+  render()
+}
+
+function unwrap(id) {
+  reply.querySelectorAll(`mark[data-id="${id}"]`).forEach(m => m.replaceWith(...m.childNodes))
+  reply.querySelectorAll(`.note[data-id="${id}"]`).forEach(n => n.remove())
+  notes.delete(id); reply.normalize()
+}
+
+function erase() {
+  const r = sel()
+  if (!r) return say('Select the highlighted words you want to clear, then press Erase.')
+  const ids = new Set([...reply.querySelectorAll('mark')].filter(m => r.intersectsNode(m)).map(m => m.dataset.id))
+  ids.forEach(unwrap)
+  window.getSelection().removeAllRanges()
+  say(ids.size ? `Removed ${ids.size} highlight${ids.size > 1 ? 's' : ''}.` : 'No highlight in that selection.')
+  render()
+}
+
+function saveNote(text) {
+  $('#noteform').classList.remove('on')
+  if (!lastId || !text.trim()) return
+  notes.set(lastId, text.trim())
+  const marks = reply.querySelectorAll(`mark[data-id="${lastId}"]`)
+  const block = marks[marks.length - 1]?.closest('p,li')
+  if (block) {
+    const n = document.createElement('span'); n.className = 'note'; n.dataset.id = lastId; n.textContent = text.trim()
+    block.after(n)
+  }
+  say('Note saved.'); render()
+}
+
+function mark() {
+  reply.querySelectorAll('.stop').forEach(s => s.remove())
+  const r = sel()
+  const end = r ? (r.endContainer.nodeType === 1 ? r.endContainer : r.endContainer.parentElement) : null
+  const block = (end && end !== reply && end.closest('p,ul')) || reply.lastElementChild
+  const stop = document.createElement('div'); stop.className = 'stop'
+  stop.innerHTML = '📍 You stopped reading here <button>Clear</button>'
+  stop.querySelector('button').onclick = () => { stop.remove(); say('Marker cleared.'); render() }
+  block.after(stop)
+  window.getSelection().removeAllRanges()
+  say('Marked where you stopped.'); render()
+}
+
+function render() {
+  const box = $('#tab-notebook')
+  const groups = new Map()
+  reply.querySelectorAll('mark').forEach(m => {
+    const g = groups.get(m.dataset.id) || { color: m.className, text: '' }
+    g.text += m.textContent; groups.set(m.dataset.id, g)
+  })
+  let html = reply.querySelector('.stop') ? '<p class="empty" style="color:#f59e0b">📍 Marker set in this reply</p>' : ''
+  for (const [id, g] of groups) html += `<div class="item"><mark class="${g.color}" style="background:var(--${g.color[0]})">${g.text.replace(/</g, '&lt;')}</mark>${notes.get(id) ? `<span class="n">✎ ${notes.get(id).replace(/</g, '&lt;')}</span>` : ''}<div class="acts"><button data-del="${id}">Remove</button></div></div>`
+  if (saved) html += `<div class="sketches">${saved}</div>`
+  box.innerHTML = html || '<p class="empty">Nothing yet. Highlight something in the reply.</p>'
+  box.querySelectorAll('[data-del]').forEach(b => b.onclick = () => { unwrap(b.dataset.del); render() })
+}
+
+function openPane(tab) {
+  pane.hidden = false; win.classList.add('paneopen')
+  document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.t === tab))
+  $('#tab-notebook').hidden = tab !== 'notebook'; $('#tab-sketch').hidden = tab !== 'sketch'
+  if (tab === 'sketch') sizePad()
+  render()
+}
+
+document.querySelectorAll('.band .chip').forEach(b => b.addEventListener('mousedown', e => e.preventDefault()))
+document.querySelectorAll('.band button').forEach(b => b.addEventListener('mousedown', e => e.preventDefault()))
+document.querySelectorAll('.band .chip').forEach(b => b.onclick = () => highlight(b.dataset.c))
+$('#erase').onclick = erase
+$('#mark').onclick = mark
+$('#nb').onclick = () => openPane('notebook')
+$('#sk').onclick = () => openPane('sketch')
+$('#closepane').onclick = () => { pane.hidden = true; win.classList.remove('paneopen') }
+document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => openPane(b.dataset.t))
+$('#noteinput').onkeydown = e => { if (e.key === 'Enter') saveNote(e.target.value) }
+$('#noteskip').onclick = () => $('#noteform').classList.remove('on')
+
+// Sketch pad: perfect-freehand turns pointer points into a smooth outline.
+const pad = $('#pad'), ctx = pad.getContext('2d')
+let strokes = [], cur = null
+function sizePad() { const r = pad.getBoundingClientRect(); pad.width = r.width * devicePixelRatio; pad.height = r.height * devicePixelRatio; draw() }
+const path = pts => {
+  const o = getStroke(pts, { size: 7, thinning: .5, smoothing: .6, streamline: .5 })
+  if (!o.length) return ''
+  return o.reduce((d, [x0, y0], i, a) => { const [x1, y1] = a[(i + 1) % a.length]; d.push(x0, y0, (x0 + x1) / 2, (y0 + y1) / 2); return d }, ['M', ...o[0], 'Q']).join(' ') + ' Z'
+}
+function draw() {
+  ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0)
+  ctx.clearRect(0, 0, pad.width, pad.height); ctx.fillStyle = '#1c1917'
+  for (const s of cur ? [...strokes, cur] : strokes) ctx.fill(new Path2D(path(s)))
+}
+const pt = e => { const r = pad.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top, e.pressure || .5] }
+pad.onpointerdown = e => { pad.setPointerCapture(e.pointerId); cur = [pt(e)]; draw() }
+pad.onpointermove = e => { if (cur) { cur.push(pt(e)); draw() } }
+pad.onpointerup = () => { if (cur) strokes.push(cur); cur = null; draw() }
+$('#padundo').onclick = () => { strokes.pop(); draw() }
+$('#padclear').onclick = () => { strokes = []; draw() }
+$('#padsave').onclick = () => {
+  if (!strokes.length) return
+  const r = pad.getBoundingClientRect()
+  saved = (saved || '') + `<svg viewBox="0 0 ${r.width} ${r.height}">${strokes.map(s => `<path d="${path(s)}" fill="#1c1917"/>`).join('')}</svg>`
+  strokes = []; draw(); openPane('notebook'); say('Sketch saved to your notebook.')
+}
+addEventListener('resize', () => { if (!pane.hidden) sizePad() })
+
+// margin.wedevit.in/#demo opens with a few marks already made.
+if (location.hash === '#demo') {
+  const pick = (el, phrase) => { const t = el.firstChild, i = t.textContent.indexOf(phrase), r = document.createRange(); r.setStart(t, i); r.setEnd(t, i + phrase.length); getSelection().removeAllRanges(); getSelection().addRange(r) }
+  const ps = reply.querySelectorAll('p'), lis = reply.querySelectorAll('li')
+  pick(ps[0], 'your session cookie and your access token expire at different times'); highlight('yellow'); saveNote('two clocks, one check')
+  pick(ps[2], 'the error handler treats every 401 as "signed out"'); highlight('pink'); $('#noteform').classList.remove('on')
+  pick(lis[2], 'Move the refresh into the API client'); highlight('green'); saveNote('do this one')
+  pick(ps[3], 'Three ways'); mark()
+  openPane('notebook'); say('Highlighted. Add a note, or just keep reading.')
+}
+
+document.querySelectorAll('pre button').forEach(b => b.onclick = () => {
+  navigator.clipboard.writeText(b.previousElementSibling.textContent).then(() => { b.textContent = 'Copied'; setTimeout(() => b.textContent = 'Copy', 1500) })
+})
+</script>
+</body>
+</html>

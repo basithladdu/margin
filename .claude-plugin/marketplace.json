@@ -1,0 +1,15 @@
+{
+  "name": "margin",
+  "description": "Margin: a highlighter, notes and reading marker for Claude Code.",
+  "owner": {
+    "name": "basithladdu",
+    "url": "https://github.com/basithladdu"
+  },
+  "plugins": [
+    {
+      "name": "margin",
+      "source": "./",
+      "description": "Highlight Claude's replies in colour, add notes, keep a 'read up to here' marker, sketch, and browse it all in a notebook."
+    }
+  ]
+}

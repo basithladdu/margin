@@ -1,0 +1,8 @@
+{
+  "name": "margin",
+  "version": "0.2.0",
+  "description": "Highlight Claude's replies in colour, add notes, keep a 'read up to here' marker, sketch, and browse it all in a notebook.",
+  "author": { "name": "basithladdu", "url": "https://github.com/basithladdu" },
+  "license": "MIT",
+  "types": "./types/index.d.ts"
+}
