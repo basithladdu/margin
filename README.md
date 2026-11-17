@@ -8,10 +8,11 @@
 
 Long replies are great until you lose your place, or can't find the one line that mattered. Margin adds a pen and a bookmark to Claude Code:
 
-- **Highlight** any part of a reply in yellow, green, pink, blue or orange.
+- **Highlight** any part of a reply in yellow, green, pink, blue or orange, or mark it with an underline or a strike. Bold, italics and code keep their look.
+- **↶ Undo** your last change, any time.
 - **Pin a note** to a highlight. It shows under the paragraph.
 - **📍 Mark read here** drops a marker where you stopped. **Resume** shows everything after it. **Clear** takes it off.
-- **✏️ Sketch** a quick idea in the side pane. Strokes are smoothed into clean SVGs with [perfect-freehand](https://github.com/steveruizok/perfect-freehand).
+- **✏️ Sketch here** opens a drawing pad right under the reply, in the chat. Pick an ink, draw, Save, and the sketch stays under that reply. Strokes are smoothed into clean SVGs with [perfect-freehand](https://github.com/steveruizok/perfect-freehand).
 - **❝ Quote** drops what you selected into the prompt, so you can ask Claude about exactly that.
 - **📓 Notebook** keeps it all, per session or across every session. Search it, filter by colour, copy it as Markdown, and browse it as a web page.
 - **Hide it** when you don't need it. The row folds down to one small button.
@@ -50,7 +51,9 @@ Start a new session (in the desktop app too). The Margin row shows up above the 
 | Ask Claude about a bit | Select it, press **❝ Quote**, type your question |
 | See everything | **📓 Notebook**, or type `/margin`. Search, filter by colour, **Copy as Markdown** |
 | Hide the row | The **✕** at the end of the row, or `/margin hide`. Bring it back with **🖍 Margin** or `/margin show` |
-| Draw | **✏️ Sketch**, drag inside the box, **Save to notebook** |
+| Draw under a reply | Select a word in it, press **✏️ Sketch here**, drag, **Save** |
+| Undo | **↶ Undo**, `u`, or `/margin undo` |
+| Know what's new | **Resume (3 new replies)** counts what came after your marker |
 
 ## Settings
 
@@ -62,6 +65,7 @@ Change these in Claude Code's config (`/config`, or `pluginConfigs` in `~/.claud
 | `startHidden` | Start with the row folded into one small button | off |
 | `notebookFolder` | Where the notebook files go | `Documents/Margin Notebook` |
 | `saveNotebook` | Write the HTML and Markdown notebook at all | on |
+| `autoMark` | Sending a message moves your marker to the latest reply | off |
 
 ## Where your stuff lives
 
@@ -69,15 +73,17 @@ All of it is local. Nothing is sent anywhere.
 
 - Claude Code keeps Margin's data in its own plugin store on your machine.
 - Every change is also written to **`Documents/Margin Notebook/`**:
-  - `index.html`: your notebook. Open it in any browser and search it.
+  - `index.html`: your notebook. Open it in any browser: search with `/`, filter by colour, #tag or project, copy or download as Markdown, print, light or dark.
   - `notebook.md`: the same as Markdown. Point Obsidian or Logseq at the folder.
   - `sketches/*.svg`: one file per sketch.
 
+![The Margin notebook](docs/notebook.png)
+
 ## Honest list
 
-- A paragraph with a highlight in it is redrawn by Margin, so **bold** and `code` inside *that paragraph* show as plain text. Everything else looks exactly as Claude wrote it.
+- A paragraph with a highlight in it is redrawn by Margin. Bold, italics, code and headings keep their look, but links in that paragraph show as plain text.
 - The desktop app doesn't let mods scroll the conversation, so **Resume** opens the rest of your reading in the side pane rather than jumping.
-- The sketch pad draws with braille dots inside the app (that's what a pane can draw). Saved sketches come out smooth in the notebook.
+- Mods can't draw on top of the reply text itself, so the pad sits right under the reply. While drawing it uses braille dots (that's what the app lets a mod draw live); saved sketches come out smooth.
 - Highlights are tied to the reply they were made on. Fork or rewind a conversation and older highlights may not follow.
 
 ## Build it yourself / hack on it

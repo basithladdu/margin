@@ -1,6 +1,6 @@
 {
   "name": "margin",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Highlight Claude's replies in colour, add notes, keep a 'read up to here' marker, sketch, and browse it all in a notebook.",
   "author": {
     "name": "basithladdu",
@@ -36,6 +36,12 @@
         "compact"
       ],
       "default": "full"
+    },
+    "autoMark": {
+      "type": "boolean",
+      "title": "Mark as read when I reply",
+      "description": "Sending a message moves your marker to the latest reply.",
+      "default": false
     }
   }
 }

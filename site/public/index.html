@@ -56,7 +56,7 @@ nav a:hover{color:var(--ink)}
 .reply code{font:13px 'JetBrains Mono',monospace;background:#34302a;border-radius:4px;padding:1px 5px}
 .reply ul{margin:0 0 12px;padding-left:22px}
 .reply mark{color:#1c1917;border-radius:3px;padding:1px 0;box-decoration-break:clone;-webkit-box-decoration-break:clone;cursor:pointer}
-.reply mark.yellow{background:var(--y)}.reply mark.green{background:var(--g)}.reply mark.pink{background:var(--p)}.reply mark.blue{background:var(--b)}.reply mark.orange{background:var(--o)}
+.reply mark.yellow{background:var(--y)}.reply mark.green{background:var(--g)}.reply mark.pink{background:var(--p)}.reply mark.blue{background:var(--b)}.reply mark.orange{background:var(--o)}.reply mark.underline{background:none;color:inherit;text-decoration:underline 2px #60a5fa;text-underline-offset:3px}.reply mark.strike{background:none;color:var(--appdim);text-decoration:line-through}
 .note{display:block;font-size:13px;font-style:italic;color:var(--appdim);margin:-6px 0 12px}
 .note:before{content:'✎ '}
 .stop{color:#f59e0b;font-weight:600;font-size:14px;display:flex;align-items:center;gap:10px;margin:2px 0 14px}
@@ -65,7 +65,7 @@ nav a:hover{color:var(--ink)}
 .band{border-top:1px solid var(--appline);margin:8px -26px 0;padding:10px 18px 4px;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 .band button,.pane button{font:500 13px Inter;border-radius:7px;border:1px solid var(--appline);background:var(--app2);color:var(--apptext);padding:5px 10px;cursor:pointer}
 .band button:hover,.pane button:hover{border-color:#5d574d}
-.band .chip{color:#1c1917;border:0;font-weight:600}
+.band .chip{color:#1c1917;border:0;font-weight:600}.band .pen{font-weight:600}
 .band .sep{color:var(--appline)}
 .band[hidden],.hint[hidden]{display:none}
 .hint{font-size:12.5px;color:var(--appdim);padding:2px 18px 6px;margin:0 -26px;min-height:26px}
@@ -83,7 +83,8 @@ nav a:hover{color:var(--ink)}
 .item .acts{margin-top:6px;display:flex;gap:6px}
 .item .acts button{font-size:12px;padding:2px 8px}
 .empty{color:var(--appdim);font-size:13.5px}
-canvas{width:100%;height:240px;background:#fffdf8;border-radius:10px;touch-action:none;cursor:crosshair;display:block}
+.inpad{margin:4px 0 14px}.padbar{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.padbar button,.inks button{font:500 13px Inter;border-radius:7px;border:1px solid var(--appline);background:var(--app2);color:var(--apptext);padding:4px 9px;cursor:pointer}.inks{display:inline-flex;gap:4px}.inks button{font-size:15px;padding:2px 8px;background:#fffdf8}.inks button.on{outline:2px solid #f59e0b}#drawn svg{width:100%;max-width:420px;height:auto;background:#fffdf8;border-radius:10px;margin:4px 0 12px;display:block}
+canvas{width:100%;height:220px;background:#fffdf8;border-radius:10px;touch-action:none;cursor:crosshair;display:block}
 .sketches svg{width:100%;height:auto;background:#fffdf8;border-radius:8px;margin-top:8px}
 
 section{padding:72px 0 0}
@@ -128,7 +129,7 @@ footer a{color:var(--ink)}
 
 <div class="wrap hero">
   <h1>Claude writes a lot.<br><mark>Mark what matters.</mark></h1>
-  <p>Margin is a free mod for Claude Code. Highlight replies in five colours, pin a note to a highlight, drop a "read up to here" marker, sketch an idea, and find it all again in your notebook.</p>
+  <p>Margin is a free mod for Claude Code. Highlight replies in five colours or a pen underline, pin a note to a highlight, drop a "read up to here" marker, sketch an idea, and find it all again in your notebook.</p>
   <div class="cta">
     <a class="btn solid" href="#install">Install in a minute</a>
     <a class="btn" href="https://github.com/basithladdu/margin">★ Source on GitHub</a>
@@ -154,19 +155,27 @@ footer a{color:var(--ink)}
         </ul>
         <p>I'd go with the third. It's about twenty lines in <code>api.ts</code> and it covers the cases the other two miss, like a laptop waking from sleep.</p>
       </div>
+      <div id="tab-sketch" class="inpad" hidden>
+        <canvas id="pad"></canvas>
+        <div class="padbar"><span class="inks"><button data-ink="#1c1917" class="on" style="color:#1c1917">●</button><button data-ink="#dc2626" style="color:#dc2626">●</button><button data-ink="#2563eb" style="color:#2563eb">●</button><button data-ink="#16a34a" style="color:#16a34a">●</button><button data-ink="#ea580c" style="color:#ea580c">●</button></span><button id="padsave">Save</button><button id="padundo">Undo</button><button id="padclear">Clear</button><button id="padclose">Close</button></div>
+      </div>
+      <div id="drawn"></div>
       <div class="band" id="band">
         <button class="chip" style="background:var(--y)" data-c="yellow">Yellow</button>
         <button class="chip" style="background:var(--g)" data-c="green">Green</button>
         <button class="chip" style="background:var(--p)" data-c="pink">Pink</button>
         <button class="chip" style="background:var(--b)" data-c="blue">Blue</button>
         <button class="chip" style="background:var(--o)" data-c="orange">Orange</button>
+        <button data-c="underline" class="pen" style="text-decoration:underline 2px #60a5fa">Underline</button>
+        <button data-c="strike" class="pen" style="text-decoration:line-through">Strike</button>
         <button id="erase">Erase</button>
+        <button id="undo">↶ Undo</button>
         <span class="sep">│</span>
         <button id="mark">📍 Mark read here</button>
         <span class="sep">│</span>
         <button id="quote">❝ Quote</button>
         <button id="nb">📓 Notebook</button>
-        <button id="sk">✏️ Sketch</button>
+        <button id="sk">✏️ Sketch here</button>
         <button id="hide" title="Hide Margin" aria-label="Hide Margin">✕</button>
       </div>
       <div class="band" id="folded" hidden><button id="unfold">🖍 Margin</button></div>
@@ -176,12 +185,8 @@ footer a{color:var(--ink)}
     </div>
     <aside class="pane" id="pane" hidden>
       <h4><span>Margin</span><button id="closepane" aria-label="Close">✕</button></h4>
-      <div class="tabs"><button data-t="notebook" class="on">📓 Notebook</button><button data-t="sketch">✏️ Sketch</button></div>
+      <div class="tabs"><button data-t="notebook" class="on">📓 Notebook</button></div>
       <div id="tab-notebook"></div>
-      <div id="tab-sketch" hidden>
-        <canvas id="pad"></canvas>
-        <div style="display:flex;gap:6px;margin-top:8px"><button id="padsave">Save to notebook</button><button id="padundo">Undo</button><button id="padclear">Clear</button></div>
-      </div>
     </aside>
   </div>
 </div>
@@ -194,7 +199,7 @@ footer a{color:var(--ink)}
       <div class="card"><span class="ic">🖍️</span><h3>Highlight in colour</h3><p>Five colours, keys 1 to 5. Select, press, done. Press it again or use Erase to take it off.</p></div>
       <div class="card"><span class="ic">✎</span><h3>Notes on the side</h3><p>Pin a one-line note to any highlight. It shows under the paragraph and in your notebook.</p></div>
       <div class="card"><span class="ic">📍</span><h3>Read up to here</h3><p>Drop a marker where you stopped. Resume shows everything after it. Clear it when you're done.</p></div>
-      <div class="card"><span class="ic">✏️</span><h3>Sketch an idea</h3><p>A small sketch pad in the side pane. Strokes are smoothed into clean SVGs with <a href="https://github.com/steveruizok/perfect-freehand">perfect-freehand</a>.</p></div>
+      <div class="card"><span class="ic">✏️</span><h3>Sketch in the chat</h3><p>A drawing pad opens right under the reply, with five inks. Your sketch stays there. Strokes are smoothed into clean SVGs with <a href="https://github.com/steveruizok/perfect-freehand">perfect-freehand</a>.</p></div>
       <div class="card"><span class="ic">📓</span><h3>A notebook you can browse</h3><p>Every highlight, note and sketch lands in <code>Documents/Margin Notebook</code>: a searchable page plus Markdown for Obsidian or Logseq.</p></div>
       <div class="card"><span class="ic">❝</span><h3>Quote it back</h3><p>Select a line Claude wrote and press Quote. It lands in your prompt so you can ask about exactly that.</p></div>
       <div class="card"><span class="ic">🙈</span><h3>Out of the way</h3><p>Hide the row with one click or <code>/margin hide</code>. A compact icon-only style and a start-hidden option are in settings.</p></div>
@@ -261,9 +266,12 @@ function textNodesIn(range) {
   return out
 }
 
+const history = []
+const snap = () => { history.push([reply.innerHTML, new Map(notes)]); if (history.length > 30) history.shift() }
 function highlight(color) {
   const r = sel()
   if (!r) return say('Select some words in the reply first, then pick a colour.')
+  snap()
   const id = 'h' + (++seq)
   for (const n of textNodesIn(r)) {
     let start = n === r.startContainer ? r.startOffset : 0
@@ -291,6 +299,7 @@ function unwrap(id) {
 function erase() {
   const r = sel()
   if (!r) return say('Select the highlighted words you want to clear, then press Erase.')
+  snap()
   const ids = new Set([...reply.querySelectorAll('mark')].filter(m => r.intersectsNode(m)).map(m => m.dataset.id))
   ids.forEach(unwrap)
   window.getSelection().removeAllRanges()
@@ -348,8 +357,9 @@ function openPane(tab) {
 
 document.querySelectorAll('.band .chip').forEach(b => b.addEventListener('mousedown', e => e.preventDefault()))
 document.querySelectorAll('.band button').forEach(b => b.addEventListener('mousedown', e => e.preventDefault()))
-document.querySelectorAll('.band .chip').forEach(b => b.onclick = () => highlight(b.dataset.c))
+document.querySelectorAll('.band [data-c]').forEach(b => b.onclick = () => highlight(b.dataset.c))
 $('#erase').onclick = erase
+$('#undo').onclick = () => { const h = history.pop(); if (!h) return say('Nothing to undo.'); reply.innerHTML = h[0]; notes.clear(); h[1].forEach((v, k) => notes.set(k, v)); reply.querySelectorAll('.stop button').forEach(b => b.onclick = () => { b.parentElement.remove(); render() }); say('Undone.'); render() }
 $('#quote').onclick = () => {
   const r = sel()
   if (!r) return say('Select text in the reply, then press Quote to ask Claude about it.')
@@ -361,7 +371,9 @@ $('#hide').onclick = () => { $('#band').hidden = true; $('#hint').hidden = true;
 $('#unfold').onclick = () => { $('#band').hidden = false; $('#hint').hidden = false; $('#folded').hidden = true }
 $('#mark').onclick = mark
 $('#nb').onclick = () => openPane('notebook')
-$('#sk').onclick = () => openPane('sketch')
+$('#sk').onclick = () => { const p = $('#tab-sketch'); p.hidden = !p.hidden; if (!p.hidden) { sizePad(); say('Sketch pad open under the reply. Drag to draw, then Save.') } }
+$('#padclose').onclick = () => { $('#tab-sketch').hidden = true }
+document.querySelectorAll('.inks button').forEach(b => b.onclick = () => { ink = b.dataset.ink; document.querySelectorAll('.inks button').forEach(x => x.classList.toggle('on', x === b)) })
 $('#closepane').onclick = () => { pane.hidden = true; win.classList.remove('paneopen') }
 document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => openPane(b.dataset.t))
 $('#noteinput').onkeydown = e => { if (e.key === 'Enter') saveNote(e.target.value) }
@@ -369,7 +381,7 @@ $('#noteskip').onclick = () => $('#noteform').classList.remove('on')
 
 // Sketch pad: perfect-freehand turns pointer points into a smooth outline.
 const pad = $('#pad'), ctx = pad.getContext('2d')
-let strokes = [], cur = null
+let strokes = [], cur = null, ink = '#1c1917'
 function sizePad() { const r = pad.getBoundingClientRect(); pad.width = r.width * devicePixelRatio; pad.height = r.height * devicePixelRatio; draw() }
 const path = pts => {
   const o = getStroke(pts, { size: 7, thinning: .5, smoothing: .6, streamline: .5 })
@@ -378,11 +390,11 @@ const path = pts => {
 }
 function draw() {
   ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0)
-  ctx.clearRect(0, 0, pad.width, pad.height); ctx.fillStyle = '#1c1917'
-  for (const s of cur ? [...strokes, cur] : strokes) ctx.fill(new Path2D(path(s)))
+  ctx.clearRect(0, 0, pad.width, pad.height)
+  for (const s of cur ? [...strokes, cur] : strokes) { ctx.fillStyle = s.ink; ctx.fill(new Path2D(path(s))) }
 }
 const pt = e => { const r = pad.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top, e.pressure || .5] }
-pad.onpointerdown = e => { pad.setPointerCapture(e.pointerId); cur = [pt(e)]; draw() }
+pad.onpointerdown = e => { pad.setPointerCapture(e.pointerId); cur = [pt(e)]; cur.ink = ink; draw() }
 pad.onpointermove = e => { if (cur) { cur.push(pt(e)); draw() } }
 pad.onpointerup = () => { if (cur) strokes.push(cur); cur = null; draw() }
 $('#padundo').onclick = () => { strokes.pop(); draw() }
@@ -390,8 +402,9 @@ $('#padclear').onclick = () => { strokes = []; draw() }
 $('#padsave').onclick = () => {
   if (!strokes.length) return
   const r = pad.getBoundingClientRect()
-  saved = (saved || '') + `<svg viewBox="0 0 ${r.width} ${r.height}">${strokes.map(s => `<path d="${path(s)}" fill="#1c1917"/>`).join('')}</svg>`
-  strokes = []; draw(); openPane('notebook'); say('Sketch saved to your notebook.')
+  const svg = `<svg viewBox="0 0 ${r.width} ${r.height}">${strokes.map(s => `<path d="${path(s)}" fill="${s.ink}"/>`).join('')}</svg>`
+  saved = (saved || '') + svg; $('#drawn').insertAdjacentHTML('beforeend', svg)
+  strokes = []; draw(); $('#tab-sketch').hidden = true; render(); say('Sketch saved under the reply and in your notebook.')
 }
 addEventListener('resize', () => { if (!pane.hidden) sizePad() })
 

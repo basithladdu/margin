@@ -3,13 +3,16 @@
 
 import type { Highlight, MarkColor } from '../types'
 
-export type Segment = { text: string; color?: MarkColor }
+/** How a run of text looks: its mark, and the markdown styling it had. */
+export type Segment = { text: string; color?: MarkColor; bold?: true; italic?: true; code?: true; head?: true }
+
+type Style = { bold?: true; italic?: true; code?: true; head?: true }
 
 export type Piece =
   | { kind: 'md'; md: string }
   | { kind: 'marked'; segments: Segment[]; isCode: boolean; notes: Highlight[] }
 
-type Block = { md: string; isCode: boolean; plain: string }
+type Block = { md: string; isCode: boolean; plain: string; styles: Style[] }
 
 const FENCE = /^\s*(```|~~~)/
 
@@ -54,26 +57,76 @@ export function splitBlocks(md: string): { md: string; isCode: boolean }[] {
   return out
 }
 
+/**
+ * What a reader sees of a block, with how each character was styled: markdown
+ * marks taken out, bold, italic, inline code and headings kept as flags.
+ */
+export function toStyled(md: string, isCode: boolean): { plain: string; styles: Style[] } {
+  let plain = ''
+  const styles: Style[] = []
+  const put = (ch: string, st: Style) => {
+    plain += ch
+    styles.push(st)
+  }
+  if (isCode) {
+    const lines = md.split('\n').filter(l => !FENCE.test(l))
+    lines.forEach((l, n) => {
+      for (const ch of l) put(ch, { code: true })
+      if (n < lines.length - 1) put('\n', { code: true })
+    })
+    return { plain, styles }
+  }
+  let bold = false
+  let italic = false
+  const lines = md.split('\n')
+  lines.forEach((raw, n) => {
+    const heading = /^\s{0,3}#{1,6}\s+/.exec(raw)
+    const line = raw
+      .replace(/^\s{0,3}#{1,6}\s+/, '')
+      .replace(/^\s*>\s?/, '')
+      .replace(/^(\s*)[-*+]\s+/, '$1• ')
+    let inCode = false
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i]!
+      const st = (): Style => ({
+        ...(bold ? { bold: true as const } : {}),
+        ...(italic ? { italic: true as const } : {}),
+        ...(heading ? { head: true as const } : {}),
+      })
+      if (inCode) {
+        if (ch === '`') inCode = false
+        else put(ch, { ...st(), code: true })
+        continue
+      }
+      if (ch === '`') {
+        inCode = true
+        continue
+      }
+      if ((ch === '*' && line[i + 1] === '*') || (ch === '_' && line[i + 1] === '_')) {
+        bold = !bold
+        i++
+        continue
+      }
+      if (ch === '*') {
+        italic = !italic
+        continue
+      }
+      const link = /^!?\[([^\]]*)\]\([^)]*\)/.exec(line.slice(i))
+      if ((ch === '[' || (ch === '!' && line[i + 1] === '[')) && link) {
+        for (const c of link[1]!) put(c, st())
+        i += link[0].length - 1
+        continue
+      }
+      put(ch, st())
+    }
+    if (n < lines.length - 1) put('\n', {})
+  })
+  return { plain, styles }
+}
+
 /** What a reader sees of a block: markdown marks taken out. */
 export function toPlain(md: string, isCode: boolean): string {
-  if (isCode) {
-    return md
-      .split('\n')
-      .filter(l => !FENCE.test(l))
-      .join('\n')
-  }
-  return md
-    .split('\n')
-    .map(line =>
-      line
-        .replace(/^\s{0,3}#{1,6}\s+/, '')
-        .replace(/^\s*>\s?/, '')
-        .replace(/^(\s*)[-*+]\s+/, '$1• ')
-        .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
-        .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-        .replace(/\*\*|__|\*|`/g, ''),
-    )
-    .join('\n')
+  return toStyled(md, isCode).plain
 }
 
 /** Letters and digits only, lowercased, with a map back to `s`. */
@@ -121,7 +174,7 @@ export function blockHas(md: string, needle: string): boolean {
 }
 
 function blocksOf(md: string): Block[] {
-  return splitBlocks(md).map(b => ({ ...b, plain: toPlain(b.md, b.isCode) }))
+  return splitBlocks(md).map(b => ({ ...b, ...toStyled(b.md, b.isCode) }))
 }
 
 function plainOf(md: string): string {
@@ -165,10 +218,13 @@ export function layout(md: string, highlights: readonly Highlight[]): Piece[] {
       for (let k = r.s; k < r.e; k++) colors[k] = r.h.color
     }
     const segments: Segment[] = []
+    const same = (a: Segment, c: MarkColor | undefined, st: Style) =>
+      a.color === c && a.bold === st.bold && a.italic === st.italic && a.code === st.code && a.head === st.head
     for (let k = 0; k < b.plain.length; k++) {
       const last = segments[segments.length - 1]
-      if (last && last.color === colors[k]) last.text += b.plain[k]
-      else segments.push({ text: b.plain[k]!, color: colors[k] })
+      const st = b.styles[k] ?? {}
+      if (last && same(last, colors[k], st)) last.text += b.plain[k]
+      else segments.push({ text: b.plain[k]!, ...(colors[k] ? { color: colors[k] } : {}), ...st })
     }
     // A note shows under the block where its highlight ends.
     const notes = ranges.filter(r => r.h.note && r.e > bs && r.e <= be).map(r => r.h)

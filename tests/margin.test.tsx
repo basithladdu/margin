@@ -42,6 +42,7 @@ const PANE = {
   },
 } as const
 
+const draws = new Map<string, number>()
 let selection: { text: string; requestId?: string } | undefined
 
 function engine(on: On) {
@@ -54,6 +55,7 @@ function engine(on: On) {
   on('ui.scroll', { plugin: '*' } as {}, () => ({ deny: 'not scrollable here' }))
   on('ui.selection', () => ({ value: selection }))
   on('ui.render', ($, e) => {
+    draws.set(e.requestId, (draws.get(e.requestId) ?? 0) + 1)
     const { Text } = $.ui.resolve(e)
     return <Text>engine draws this</Text>
   })
@@ -127,23 +129,49 @@ test('mark, resume falls back to the pane, clear mark removes it', async ($, on)
   await band.unmount()
 })
 
-test('the sketch pad saves a drawing to the notebook', async ($, on) => {
+test('sketch here opens a pad under the reply and keeps the drawing there', async ($, on) => {
   engine(on)
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  const first = await $.ui.mount(msg('desktop'))
+  await first.unmount()
+  selection = { text: 'Last paragraph', requestId: 'm1' }
   const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
   await band.press({ key: 'sketch' })
   await band.unmount()
 
-  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  await pane.resize({ columns: 40, rows: 18, in: 'pad' })
-  await pane.pointer({ type: 'down', x: 3, y: 2, button: 'left', in: 'pad' })
-  await pane.pointer({ type: 'move', x: 9, y: 4, button: 'left', in: 'pad' })
-  await pane.pointer({ type: 'up', x: 9, y: 4, button: 'left', in: 'pad' })
-  expect(await pane.find({ type: 'Text', text: /1 strokes/, in: 'pad' })).toBeDefined()
-  await pane.press({ key: 'pad-save' })
-  await pane.press({ key: 'tab-notebook' })
-  expect(await pane.find({ type: 'Svg' })).toBeDefined()
-  await pane.unmount()
+  const reply = await $.ui.mount(msg('desktop'))
+  await reply.resize({ columns: 40, rows: 16, in: 'pad-m1' })
+  await reply.pointer({ type: 'down', x: 3, y: 2, button: 'left', in: 'pad-m1' })
+  await reply.pointer({ type: 'move', x: 9, y: 4, button: 'left', in: 'pad-m1' })
+  await reply.pointer({ type: 'up', x: 9, y: 4, button: 'left', in: 'pad-m1' })
+  await reply.press({ key: 'pad-save' })
+  expect(await reply.find({ type: 'Svg' })).toBeDefined()
+  await reply.press({ key: 'undo', plugin: 'margin' }).catch(() => undefined)
+  await reply.unmount()
+})
+
+test('underline, undo, and a press redraws only the reply it touches', async ($, on) => {
+  engine(on)
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  for (const [id, text] of [['m1', REPLY], ['m2', 'Another reply with words.']] as const) {
+    const r = await $.ui.mount(msg('desktop', id, text))
+    await r.unmount()
+  }
+  const other = await $.ui.mount(msg('desktop', 'm2', 'Another reply with words.'))
+  const before = draws.get('m2') ?? 0
+  selection = { text: 'Last paragraph', requestId: 'm1' }
+  const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  await band.press({ key: 'hl-underline' })
+  expect(draws.get('m2') ?? 0).toBe(before)
+  const one = await $.ui.mount(msg('desktop'))
+  expect(await one.find({ type: 'Text', text: 'Last paragraph' })).toBeDefined()
+  await one.unmount()
+  await band.press({ key: 'undo' })
+  const back = await $.ui.mount(msg('desktop'))
+  expect(await back.find({ type: 'Text', text: 'engine draws this' })).toBeDefined()
+  await back.unmount()
+  await band.unmount()
+  await other.unmount()
 })
 
 test('the row folds away and comes back, by button and by /margin', async ($, on) => {

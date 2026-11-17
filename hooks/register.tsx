@@ -1,12 +1,14 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Highlight, MarkColor, MarksData, PaneView, Sketch } from '../types'
+import type { Highlight, MarkColor, MarksData, PaneView, ReplyMarks, Sketch } from '../types'
 import { sketchSvg } from './ink'
 import { assign, blockHas, firstLine, layout, overlapping } from './marks'
+import type { Segment } from './marks'
 import { notebookHtml, notebookMarkdown } from './notebook'
 
 const STORE_KEY = 'margin-v1'
+const UI_KEY = 'margin-ui'
 const PANE = 'margin'
 const EMPTY: MarksData = { highlights: {}, markers: [], sketches: [] }
 
@@ -14,31 +16,60 @@ const data = atom({ plugin: 'margin', key: 'data' } as const, EMPTY, { shape: 'm
 const noting = atom({ plugin: 'margin', key: 'noting' } as const, null)
 const flash = atom({ plugin: 'margin', key: 'flash' } as const, null)
 const view = atom({ plugin: 'margin', key: 'view' } as const, 'notebook')
+const focus = atom({ plugin: 'margin', key: 'focus' } as const, null)
 const showAll = atom({ plugin: 'margin', key: 'showAll' } as const, false)
 const hidden = atom({ plugin: 'margin', key: 'hidden' } as const, false)
 const query = atom({ plugin: 'margin', key: 'query' } as const, '')
 const filter = atom({ plugin: 'margin', key: 'filter' } as const, 'all')
-const UI_KEY = 'margin-ui'
+const canUndo = atom({ plugin: 'margin', key: 'canUndo' } as const, false)
+// One member per reply: a change redraws that reply alone, so pressing a
+// button never makes the whole conversation draw again.
+const REPLY = { plugin: 'margin', key: 'reply' } as const
 
-const COLORS: Record<MarkColor, { bg: string; fg: string; label: string; key: string }> = {
-  yellow: { bg: '#fde68a', fg: '#1c1917', label: 'Yellow', key: '1' },
-  green: { bg: '#bbf7d0', fg: '#1c1917', label: 'Green', key: '2' },
-  pink: { bg: '#fbcfe8', fg: '#1c1917', label: 'Pink', key: '3' },
-  blue: { bg: '#bfdbfe', fg: '#1c1917', label: 'Blue', key: '4' },
-  orange: { bg: '#fed7aa', fg: '#1c1917', label: 'Orange', key: '5' },
+type Look = { label: string; key: string; bg?: string; fg?: string; underline?: true; strike?: true }
+const COLORS: Record<MarkColor, Look> = {
+  yellow: { label: 'Yellow', key: '1', bg: '#fde68a', fg: '#1c1917' },
+  green: { label: 'Green', key: '2', bg: '#bbf7d0', fg: '#1c1917' },
+  pink: { label: 'Pink', key: '3', bg: '#fbcfe8', fg: '#1c1917' },
+  blue: { label: 'Blue', key: '4', bg: '#bfdbfe', fg: '#1c1917' },
+  orange: { label: 'Orange', key: '5', bg: '#fed7aa', fg: '#1c1917' },
+  underline: { label: 'Underline', key: '6', underline: true },
+  strike: { label: 'Strike', key: '7', strike: true },
 }
 const COLOR_NAMES = Object.keys(COLORS) as MarkColor[]
 const MARKER_COLOR = '#d97706'
 const HINT = 'Select text in a reply, then pick a colour. Erase takes it off. Quote asks Claude about it. /margin hide folds this row away.'
 
+/** Text props that draw a mark: a pastel background, or a pen line. */
+function lookOf(c: MarkColor | undefined) {
+  if (!c) return {}
+  const l = COLORS[c]
+  if (l.underline) return { underline: true, color: '#2563eb' }
+  if (l.strike) return { strikethrough: true, dimColor: true }
+  return { backgroundColor: l.bg, color: l.fg }
+}
+
+function segmentProps(s: Segment) {
+  return {
+    ...lookOf(s.color),
+    ...(s.bold || s.head ? { weight: 'semibold' as const } : {}),
+    ...(s.italic ? { italic: true } : {}),
+    ...(s.code ? { mono: true } : {}),
+    ...(s.head ? { size: 'heading' as const } : {}),
+  }
+}
+
 // What this run of the module has seen drawn: reply blocks in order. Rebuilt
 // as the transcript draws after a reload.
 const texts = new Map<string, string>()
 const order: string[] = []
+const replyStarts = new Set<string>()
 const visible = new Set<string>()
 const here = { session: '', where: '', dir: '', isWindows: false, isMac: false }
+const undoStack: MarksData[] = []
+let sketchingId: string | null = null
 // The person's settings (userConfig in plugin.json), read at each load.
-const cfg = { folder: '', startHidden: false, compact: false, writeFiles: true }
+const cfg = { folder: '', startHidden: false, compact: false, writeFiles: true, autoMark: false }
 
 const seen = () => order.filter(id => texts.has(id)).map(id => ({ id, md: texts.get(id)! }))
 const markerHere = (d: MarksData) => d.markers.find(m => texts.has(m))
@@ -46,8 +77,18 @@ const short = (s: string, n: number) => {
   const one = s.replace(/\s+/g, ' ').trim()
   return one.length > n ? one.slice(0, n - 1) + '…' : one
 }
-const isMine = (h: { session?: string; requestId?: string }) =>
-  (h.session !== undefined && h.session === here.session) || (h.requestId !== undefined && texts.has(h.requestId))
+const isMine = (x: { session?: string; requestId?: string }) =>
+  (x.session !== undefined && x.session === here.session) || (x.requestId !== undefined && texts.has(x.requestId))
+const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`
+
+/** Replies drawn after the marker, counted by reply (not by text block). */
+function newSince(m: string): number {
+  const at = order.indexOf(m)
+  if (at < 0) return 0
+  const after = order.slice(at + 1)
+  const starts = after.filter(id => replyStarts.has(id)).length
+  return starts || (after.length ? 1 : 0)
+}
 
 function normalize(v: unknown): MarksData | undefined {
   if (!v || typeof v !== 'object') return undefined
@@ -58,6 +99,33 @@ function normalize(v: unknown): MarksData | undefined {
     markers: Array.isArray(o.markers) ? o.markers : [],
     sketches: Array.isArray(o.sketches) ? o.sketches : [],
   }
+}
+
+function marksFor(d: MarksData, id: string): ReplyMarks {
+  return {
+    highlights: d.highlights[id] ?? [],
+    isMarked: d.markers.includes(id),
+    sketches: d.sketches.filter(s => s.requestId === id),
+    isSketching: sketchingId === id,
+  }
+}
+
+/** Writes the reply members whose marks differ between two versions. */
+async function syncReplies($: EngineInterface, before: MarksData | null, after: MarksData, also: string[] = []) {
+  const ids = new Set<string>(also)
+  for (const k of new Set([...Object.keys(after.highlights), ...Object.keys(before?.highlights ?? {})])) {
+    if (JSON.stringify(after.highlights[k] ?? []) !== JSON.stringify(before?.highlights[k] ?? [])) ids.add(k)
+  }
+  const was = new Set(before?.markers ?? [])
+  const now = new Set(after.markers)
+  for (const m of now) if (!was.has(m)) ids.add(m)
+  for (const m of was) if (!now.has(m)) ids.add(m)
+  const sk = (d: MarksData | null) => new Map((d?.sketches ?? []).map(s => [s.id, s.requestId]))
+  const a = sk(before)
+  const b = sk(after)
+  for (const [id, rid] of b) if (!a.has(id) && rid) ids.add(rid)
+  for (const [id, rid] of a) if (!b.has(id) && rid) ids.add(rid)
+  for (const id of ids) await $.state.set({ ...REPLY, id }, marksFor(after, id))
 }
 
 async function writeNotebook($: EngineInterface, d: MarksData) {
@@ -71,11 +139,32 @@ async function writeNotebook($: EngineInterface, d: MarksData) {
   }
 }
 
+async function persist($: EngineInterface, d: MarksData) {
+  await $.store.set(STORE_KEY, d)
+  await writeNotebook($, d)
+}
+
 async function save($: EngineInterface, change: (d: MarksData) => MarksData) {
-  const next = await update($, data, change)
-  await $.store.set(STORE_KEY, next)
-  await writeNotebook($, next)
-  return next
+  const before = await read($, data)
+  const after = await update($, data, change)
+  undoStack.push(before)
+  if (undoStack.length > 30) undoStack.shift()
+  await update($, canUndo, () => true)
+  await syncReplies($, before, after)
+  await persist($, after)
+  return after
+}
+
+async function undo($: EngineInterface) {
+  const prev = undoStack.pop()
+  if (!prev) return say($, 'Nothing to undo.')
+  const before = await read($, data)
+  await update($, data, () => prev)
+  await update($, canUndo, () => undoStack.length > 0)
+  await syncReplies($, before, prev)
+  await persist($, prev)
+  await update($, noting, () => null)
+  await say($, 'Undone.')
 }
 
 async function say($: EngineInterface, text: string | null) {
@@ -97,6 +186,17 @@ async function targetsOf($: EngineInterface) {
   return { text, targets: assign(text, seen()) }
 }
 
+/** The reply a button means: the one the selection is in, else the lowest on screen, else the latest. */
+async function replyInFocus($: EngineInterface): Promise<{ id: string | undefined; fromSelection: boolean }> {
+  const sel = await $.ui.selection()
+  if (sel?.requestId && texts.has(sel.requestId)) return { id: sel.requestId, fromSelection: true }
+  if (sel?.text.trim()) {
+    const hit = assign(sel.text, seen()).pop()?.id
+    if (hit) return { id: hit, fromSelection: true }
+  }
+  return { id: order.filter(id => visible.has(id)).pop() ?? order[order.length - 1], fromSelection: false }
+}
+
 async function highlight($: EngineInterface, color: MarkColor) {
   const { text, targets } = await targetsOf($)
   if (!text) return say($, 'Select some text in a reply first, then pick a colour.')
@@ -111,7 +211,7 @@ async function highlight($: EngineInterface, color: MarkColor) {
       const list = highlights[t.id] ?? []
       const same = list.find(x => x.text === t.text && x.color === color)
       if (same) {
-        // Same text, same colour again: take it off.
+        // Same text, same look again: take it off.
         highlights[t.id] = list.filter(x => x !== same)
         removed++
         return
@@ -125,6 +225,7 @@ async function highlight($: EngineInterface, color: MarkColor) {
         at: now,
         session: here.session,
         where: here.where,
+        context: firstLine(texts.get(t.id) ?? '', 90),
         ...(old?.note ? { note: old.note } : {}),
       }
       highlights[t.id] = [...list.filter(x => x.text !== t.text), hl]
@@ -134,19 +235,21 @@ async function highlight($: EngineInterface, color: MarkColor) {
     return { ...d, highlights }
   })
   await update($, noting, () => lastId)
-  await say($, lastId ? 'Highlighted. Add a note below, or just keep reading.' : removed ? 'Highlight removed.' : null)
+  await say($, lastId ? 'Marked. Add a note below, or just keep reading.' : removed ? 'Highlight removed.' : null)
 }
 
 async function erase($: EngineInterface) {
   const { text, targets } = await targetsOf($)
   if (!text) return say($, 'Select the highlighted text you want to clear, then press Erase.')
   let gone = 0
+  const d0 = await read($, data)
+  for (const t of targets) gone += overlapping(texts.get(t.id) ?? '', d0.highlights[t.id] ?? [], t.text).length
+  if (gone === 0) return say($, 'No highlight in that selection.')
   await save($, d => {
     const highlights = { ...d.highlights }
     for (const t of targets) {
       const list = highlights[t.id] ?? []
       const hit = new Set(overlapping(texts.get(t.id) ?? '', list, t.text).map(x => x.id))
-      gone += hit.size
       const left = list.filter(x => !hit.has(x.id))
       if (left.length) highlights[t.id] = left
       else delete highlights[t.id]
@@ -154,19 +257,19 @@ async function erase($: EngineInterface) {
     return { ...d, highlights }
   })
   await update($, noting, () => null)
-  await say($, gone ? `Removed ${gone} highlight${gone > 1 ? 's' : ''}.` : 'No highlight in that selection.')
+  await say($, `Removed ${plural(gone, 'highlight')}. Undo brings ${gone > 1 ? 'them' : 'it'} back.`)
+}
+
+async function setMarker($: EngineInterface, target: string) {
+  const mine = new Set(order)
+  await save($, d => ({ ...d, markers: [target, ...d.markers.filter(m => !mine.has(m))].slice(0, 300) }))
 }
 
 async function markHere($: EngineInterface) {
-  const sel = await $.ui.selection()
-  let target: string | undefined
-  if (sel?.requestId && texts.has(sel.requestId)) target = sel.requestId
-  if (!target && sel?.text.trim()) target = assign(sel.text, seen()).pop()?.id
-  if (!target) target = order.filter(id => visible.has(id)).pop() ?? order[order.length - 1]
-  if (!target) return say($, 'No reply to mark yet.')
-  const mine = new Set(order)
-  await save($, d => ({ ...d, markers: [target!, ...d.markers.filter(m => !mine.has(m))].slice(0, 300) }))
-  await say($, sel?.text.trim() ? 'Marked where you stopped.' : 'Marked the latest reply. Select text in a reply first to mark that one.')
+  const { id, fromSelection } = await replyInFocus($)
+  if (!id) return say($, 'No reply to mark yet.')
+  await setMarker($, id)
+  await say($, fromSelection ? 'Marked where you stopped.' : 'Marked the latest reply. Select text in a reply first to mark that one.')
 }
 
 async function clearMark($: EngineInterface) {
@@ -197,6 +300,7 @@ async function removeHighlight($: EngineInterface, hl: Highlight) {
     else delete highlights[hl.requestId]
     return { ...d, highlights }
   })
+  await say($, 'Highlight removed. Undo brings it back.')
 }
 
 async function setNote($: EngineInterface, id: string, note: string) {
@@ -213,6 +317,29 @@ async function setNote($: EngineInterface, id: string, note: string) {
   })
   await update($, noting, () => null)
   await say($, note.trim() ? 'Note saved.' : null)
+}
+
+async function setSketching($: EngineInterface, id: string | null) {
+  const was = sketchingId
+  sketchingId = id
+  const d = await read($, data)
+  for (const r of new Set([was, id])) if (r) await $.state.set({ ...REPLY, id: r }, marksFor(d, r))
+}
+
+async function startSketch($: EngineInterface) {
+  const { id } = await replyInFocus($)
+  if (!id) return say($, 'No reply to sketch under yet.')
+  if (sketchingId === id) {
+    await setSketching($, null)
+    return say($, 'Sketch pad closed.')
+  }
+  await setSketching($, id)
+  await say($, 'Sketch pad open under the reply. Drag to draw, then Save.')
+}
+
+async function removeSketch($: EngineInterface, id: string) {
+  await save($, d => ({ ...d, sketches: d.sketches.filter(x => x.id !== id) }))
+  await say($, 'Sketch removed. Undo brings it back.')
 }
 
 async function openFile($: EngineInterface, path: string) {
@@ -239,15 +366,13 @@ async function quote($: EngineInterface) {
 }
 
 function asMarkdown(list: readonly Highlight[]): string {
-  return list
-    .map(x => `> ${x.text.replace(/\n/g, '\n> ')}` + (x.note ? `\n\n${x.note}` : ''))
-    .join('\n\n---\n\n')
+  return list.map(x => `> ${x.text.replace(/\n/g, '\n> ')}` + (x.note ? `\n\n${x.note}` : '')).join('\n\n---\n\n')
 }
 
 async function copyAll($: EngineInterface, list: readonly Highlight[]) {
   if (list.length === 0) return say($, 'Nothing to copy yet.')
   const r = await $.ui.copy({ text: asMarkdown(list) })
-  await say($, r.isCopied ? `Copied ${list.length} highlight${list.length > 1 ? 's' : ''} as Markdown.` : "Couldn't copy here. Open the notebook in your browser instead.")
+  await say($, r.isCopied ? `Copied ${plural(list.length, 'highlight')} as Markdown.` : "Couldn't copy here. Open the notebook in your browser instead.")
 }
 
 export const register: Register = (on, options) => {
@@ -255,10 +380,14 @@ export const register: Register = (on, options) => {
   cfg.startHidden = options.startHidden === true
   cfg.compact = options.rowStyle === 'compact'
   cfg.writeFiles = options.saveNotebook !== false
+  cfg.autoMark = options.autoMark === true
 
   on('session.start', async ($, e, next) => {
     const stored = normalize(await $.store.get(STORE_KEY))
-    if (stored) await update($, data, () => stored)
+    if (stored) {
+      await update($, data, () => stored)
+      await syncReplies($, null, stored)
+    }
     here.session = await $.session.id()
     here.where = e.cwd.split(/[\\/]/).filter(Boolean).pop() ?? 'Claude Code'
     const profile = await $.env.get('USERPROFILE')
@@ -272,10 +401,20 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'margin',
       description: 'Margin: open the notebook, or hide/show the row above the prompt',
-      argumentHint: '[hide | show | sketch | resume]',
+      argumentHint: '[hide | show | sketch | resume | undo]',
     })
     return next(e)
   })
+
+  // With auto-mark on, sending a message marks the latest reply as read.
+  on('prompt.submit', async ($, e, next) => {
+    if (cfg.autoMark && !e.command && !e.isMeta) {
+      const last = order[order.length - 1]
+      const d = await read($, data)
+      if (last && markerHere(d) !== last) await setMarker($, last)
+    }
+    return next(e)
+  }).catch(($, e, next) => next(e))
 
   on('command.run', { command: 'margin' }, async ($, e) => {
     const arg = e.args.trim().toLowerCase()
@@ -292,48 +431,109 @@ export const register: Register = (on, options) => {
       await setHidden($, now)
       return { text: now ? 'Margin row hidden.' : 'Margin row shown.' }
     }
-    if (arg === 'sketch' || arg === 'resume') {
-      await openPane($, arg)
-      return { text: `Margin ${arg} opened.` }
+    if (arg === 'undo') {
+      await undo($)
+      return { text: 'Undid the last Margin change.' }
+    }
+    if (arg === 'sketch') {
+      await startSketch($)
+      return { text: 'Sketch pad opened under the latest reply.' }
+    }
+    if (arg === 'resume') {
+      await openPane($, 'resume')
+      return { text: 'Margin resume opened.' }
     }
     await openPane($, 'notebook')
-    return { text: 'Margin notebook opened. Also: /margin hide, /margin show, /margin sketch, /margin resume.' }
+    return { text: 'Margin notebook opened. Also: /margin hide, show, sketch, resume, undo.' }
   })
 
   on('ui.message', async ($, e) => {
-    const msg = e.data as { type?: string; strokes?: number[][]; w?: number; h?: number }
+    const msg = e.data as { type?: string; strokes?: number[][]; colors?: string[]; w?: number; h?: number }
+    const rid = texts.has(e.requestId) ? e.requestId : (sketchingId ?? undefined)
+    if (msg?.type === 'cancel') {
+      await setSketching($, null)
+      return {}
+    }
     if (msg?.type === 'save' && Array.isArray(msg.strokes) && msg.strokes.length) {
       const now = await $.clock.now()
       const sk: Sketch = {
         id: `sk-${now.toString(36)}`,
         strokes: msg.strokes,
+        ...(Array.isArray(msg.colors) ? { colors: msg.colors } : {}),
         w: msg.w ?? 100,
         h: msg.h ?? 50,
         at: now,
         session: here.session,
         where: here.where,
+        ...(rid ? { requestId: rid, context: firstLine(texts.get(rid) ?? '', 90) } : {}),
       }
+      sketchingId = null
       await save($, d => ({ ...d, sketches: [...d.sketches, sk] }))
-      await say($, 'Sketch saved to your notebook.')
+      await say($, 'Sketch saved under the reply and in your notebook.')
     }
     return {}
   })
 
-  // A reply block: draw its highlights and the marker; leave the rest alone.
+  // A reply block: draw its marks, marker and sketches; leave the rest alone.
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
     const id = e.requestId
     if (!texts.has(id)) order.push(id)
     texts.set(id, e.props.text)
+    if (e.props.isFirstOfReply) replyStarts.add(id)
     if (e.props.onScreen) visible.add(id)
     else if (e.props.onScreen === null) visible.delete(id)
 
-    const d = await read($, data)
-    const hs = e.props.isSummary ? [] : (d.highlights[id] ?? [])
-    const isMarked = d.markers.includes(id)
-    if (hs.length === 0 && !isMarked) return next(e)
+    const { value: marks } = await $.state.get({ ...REPLY, id })
+    if (!marks) return next(e)
+    const hs = e.props.isSummary ? [] : marks.highlights
+    if (hs.length === 0 && !marks.isMarked && marks.sketches.length === 0 && !marks.isSketching) return next(e)
 
     const { Box, Text, Markdown, Button } = $.ui.resolve(e)
-    const marker = isMarked && (
+    const body =
+      hs.length === 0 ? (
+        await next(e)
+      ) : (
+        <Box flexDirection="column" gap="sm">
+          {layout(e.props.text, hs).map(p =>
+            p.kind === 'md' ? (
+              <Markdown text={p.md} />
+            ) : (
+              <Box flexDirection="column">
+                <Text mono={p.isCode}>
+                  {p.segments.map(s => (Object.keys(segmentProps(s)).length ? <Text {...segmentProps(s)}>{s.text}</Text> : s.text))}
+                </Text>
+                {p.notes.map(hl => (
+                  <Text size="footnote" dimColor italic>
+                    ✎ {hl.note}
+                  </Text>
+                ))}
+              </Box>
+            ),
+          )}
+        </Box>
+      )
+
+    const Svg = e.surface === 'terminal' ? undefined : $.ui.resolve(e).Svg
+    const sketches = marks.sketches.map(s => (
+      <Box flexDirection="column" key={`sk-${s.id}`}>
+        {Svg ? (
+          <Svg source={sketchSvg(s, { paper: '#fffdf8' })} alt="Your sketch" width={Math.min(420, Math.max(160, s.w * 4))} />
+        ) : (
+          <Text dimColor>✏️ Your sketch (open /margin to see it)</Text>
+        )}
+        <Box flexDirection="row" gap="sm">
+          <Button key={`skdel-${s.id}`} label="Remove sketch" dimColor onPress={() => removeSketch($, s.id)} />
+        </Box>
+      </Box>
+    ))
+
+    let pad = null
+    if (marks.isSketching && (e.surface === 'terminal' || e.surface === 'desktop')) {
+      const { Client } = $.ui.resolve(e)
+      pad = <Client key={`pad-${id}`} module="./sketch.tsx" props={{ rows: 10 }} width="100%" />
+    }
+
+    const marker = marks.isMarked && (
       <Box flexDirection="row" alignItems="center" gap="sm" marginTop="sm">
         <Text color={MARKER_COLOR} weight="semibold">
           ── 📍 You stopped reading here ──
@@ -341,42 +541,12 @@ export const register: Register = (on, options) => {
         <Button key="margin-unmark" label="Clear" dimColor onPress={() => clearMark($)} />
       </Box>
     )
-    if (hs.length === 0) {
-      return (
-        <Box flexDirection="column">
-          {await next(e)}
-          {marker}
-        </Box>
-      )
-    }
 
-    const pieces = layout(e.props.text, hs)
     return (
       <Box flexDirection="column" gap="sm">
-        {pieces.map(p =>
-          p.kind === 'md' ? (
-            <Markdown text={p.md} />
-          ) : (
-            <Box flexDirection="column">
-              <Text mono={p.isCode}>
-                {p.segments.map(s =>
-                  s.color ? (
-                    <Text backgroundColor={COLORS[s.color].bg} color={COLORS[s.color].fg}>
-                      {s.text}
-                    </Text>
-                  ) : (
-                    s.text
-                  ),
-                )}
-              </Text>
-              {p.notes.map(hl => (
-                <Text size="footnote" dimColor italic>
-                  ✎ {hl.note}
-                </Text>
-              ))}
-            </Box>
-          ),
-        )}
+        {body}
+        {sketches}
+        {pad}
         {marker}
       </Box>
     )
@@ -389,8 +559,10 @@ export const register: Register = (on, options) => {
     const d = await read($, data)
     const noteFor = await read($, noting)
     const line = await read($, flash)
+    const undoable = await read($, canUndo)
     const mine = Object.values(d.highlights).flat().filter(isMine)
-    const hasMarker = markerHere(d) !== undefined
+    const m = markerHere(d)
+    const fresh = m ? newSince(m) : 0
     const open = mine.find(x => x.id === noteFor)
     const small = cfg.compact
 
@@ -398,7 +570,7 @@ export const register: Register = (on, options) => {
       return (
         <Box flexDirection="row" alignItems="center" gap="sm">
           <Button key="show" label="🖍 Margin" dimColor onPress={() => setHidden($, false)} />
-          {hasMarker && <Button key="resume" label="📍 Resume" dimColor onPress={() => resume($)} />}
+          {m && <Button key="resume" label={fresh ? `📍 ${plural(fresh, 'new reply')}` : '📍 Resume'} dimColor onPress={() => resume($)} />}
         </Box>
       )
     }
@@ -408,20 +580,26 @@ export const register: Register = (on, options) => {
         <Box flexDirection="row" flexWrap="wrap" alignItems="center" gap="sm">
           {COLOR_NAMES.map(c => (
             <Button key={`hl-${c}`} hotkey={COLORS[c].key} onPress={() => highlight($, c)}>
-              <Text backgroundColor={COLORS[c].bg} color={COLORS[c].fg}>
-                {small ? '   ' : ` ${COLORS[c].label} `}
-              </Text>
+              <Text {...lookOf(c)}>{small ? (COLORS[c].bg ? '   ' : c === 'underline' ? ' U ' : ' S ') : ` ${COLORS[c].label} `}</Text>
             </Button>
           ))}
           <Button key="erase" hotkey="e" label={small ? '⌫' : 'Erase'} dimColor onPress={() => erase($)} />
+          {undoable && <Button key="undo" hotkey="u" label={small ? '↶' : '↶ Undo'} dimColor onPress={() => undo($)} />}
           <Text dimColor>│</Text>
           <Button key="mark" hotkey="m" label={small ? '📍' : '📍 Mark read here'} onPress={() => markHere($)} />
-          {hasMarker && <Button key="resume" hotkey="r" label={small ? '↩' : 'Resume'} onPress={() => resume($)} />}
-          {hasMarker && <Button key="unmark" label={small ? '✕📍' : 'Clear mark'} dimColor onPress={() => clearMark($)} />}
+          {m && (
+            <Button
+              key="resume"
+              hotkey="r"
+              label={small ? `↩${fresh ? ` ${fresh}` : ''}` : fresh ? `Resume (${plural(fresh, 'new reply')})` : 'Resume'}
+              onPress={() => resume($)}
+            />
+          )}
+          {m && <Button key="unmark" label={small ? '✕📍' : 'Clear mark'} dimColor onPress={() => clearMark($)} />}
           <Text dimColor>│</Text>
           <Button key="quote" hotkey="q" label={small ? '❝' : '❝ Quote'} onPress={() => quote($)} />
+          <Button key="sketch" hotkey="s" label={small ? '✏️' : sketchingId ? '✏️ Close sketch' : '✏️ Sketch here'} onPress={() => startSketch($)} />
           <Button key="notebook" hotkey="n" label={`📓${small ? '' : ' Notebook'}${mine.length ? ` (${mine.length})` : ''}`} onPress={() => openPane($, 'notebook')} />
-          <Button key="sketch" hotkey="s" label={small ? '✏️' : '✏️ Sketch'} onPress={() => openPane($, 'sketch')} />
           <Button key="hide" label="Hide Margin" role="dismiss" dimColor onPress={() => setHidden($, true)} />
         </Box>
         {open && (
@@ -429,7 +607,7 @@ export const register: Register = (on, options) => {
             <Input
               key="note"
               label="Note:"
-              placeholder={`on "${short(open.text, 30)}" (Enter to save)`}
+              placeholder={`on "${short(open.text, 30)}" (Enter to save, #tags work)`}
               value={open.note ?? ''}
               submitLabel="save"
               onSubmit={v => setNote($, open.id, v)}
@@ -444,43 +622,61 @@ export const register: Register = (on, options) => {
     )
   })
 
-  // The pane: notebook, resume reading, sketch pad.
+  // The pane: notebook, resume reading, one reply in full.
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Text, Button, Markdown } = $.ui.resolve(e)
+    const { Box, Text, Button, Markdown, Input } = $.ui.resolve(e)
     const d = await read($, data)
     const v = await read($, view)
     const all = await read($, showAll)
     const width = Math.max(24, (e.props.bodyColumns ?? 60) - 4)
     const m = markerHere(d)
+    const Svg = e.surface === 'terminal' ? undefined : $.ui.resolve(e).Svg
 
     const tabs = (
       <Box flexDirection="row" gap="sm" flexWrap="wrap">
-        {(['notebook', 'resume', 'sketch'] as const).map(t => (
-          <Button
-            key={`tab-${t}`}
-            label={t === 'notebook' ? '📓 Notebook' : t === 'resume' ? '📍 Resume' : '✏️ Sketch'}
-            variant={v === t ? 'primary' : 'secondary'}
-            onPress={() => update($, view, () => t)}
-          />
-        ))}
+        <Button key="tab-notebook" label="📓 Notebook" variant={v === 'notebook' ? 'primary' : 'secondary'} onPress={() => update($, view, () => 'notebook')} />
+        <Button key="tab-resume" label="📍 Resume" variant={v === 'resume' ? 'primary' : 'secondary'} onPress={() => update($, view, () => 'resume')} />
       </Box>
     )
 
-    if (v === 'sketch') {
-      if (e.surface !== 'terminal' && e.surface !== 'desktop') {
-        return (
-          <Box flexDirection="column" gap="sm">
-            {tabs}
-            <Text dimColor>The sketch pad needs the desktop app or a terminal.</Text>
-          </Box>
-        )
-      }
-      const { Client } = $.ui.resolve(e)
+    // One reply in full, with its marks.
+    const drawReply = (id: string) => {
+      const md = texts.get(id) ?? ''
+      const hs = d.highlights[id] ?? []
+      if (hs.length === 0) return <Markdown text={md} />
+      return (
+        <Box flexDirection="column" gap="sm">
+          {layout(md, hs).map(p =>
+            p.kind === 'md' ? (
+              <Markdown text={p.md} />
+            ) : (
+              <Box flexDirection="column">
+                <Text mono={p.isCode}>
+                  {p.segments.map(s => (Object.keys(segmentProps(s)).length ? <Text {...segmentProps(s)}>{s.text}</Text> : s.text))}
+                </Text>
+                {p.notes.map(hl => (
+                  <Text dimColor italic>
+                    ✎ {hl.note}
+                  </Text>
+                ))}
+              </Box>
+            ),
+          )}
+        </Box>
+      )
+    }
+
+    if (v === 'reply') {
+      const id = await read($, focus)
       return (
         <Box flexDirection="column" gap="sm">
           {tabs}
-          <Text dimColor>Drag inside the box to draw. Saved sketches go to your notebook as smooth SVGs.</Text>
-          <Client key="pad" module="./sketch.tsx" props={{ rows: 14 }} width="100%" />
+          {id && texts.has(id) ? (
+            drawReply(id)
+          ) : (
+            <Text dimColor>That reply isn't in this session's view. Its highlights are still in your notebook.</Text>
+          )}
+          {id && <Button key="reply-mark" label="📍 Read up to here" dimColor onPress={() => setMarker($, id)} />}
         </Box>
       )
     }
@@ -506,9 +702,9 @@ export const register: Register = (on, options) => {
             <Text>You're all caught up. Nothing new after your marker.</Text>
           ) : (
             after.map(id => (
-              <Box flexDirection="column" key={`after-${id}`}>
-                <Markdown text={texts.get(id)!} />
-                <Button key={`mark-${id}`} label="📍 Read up to here" dimColor onPress={() => save($, dd => ({ ...dd, markers: [id, ...dd.markers.filter(x => !order.includes(x))] }))} />
+              <Box flexDirection="column" key={`after-${id}`} gap="xs">
+                {drawReply(id)}
+                <Button key={`mark-${id}`} label="📍 Read up to here" dimColor onPress={() => setMarker($, id)} />
               </Box>
             ))
           )}
@@ -522,74 +718,80 @@ export const register: Register = (on, options) => {
       .flat()
       .filter(x => all || isMine(x))
       .filter(x => only === 'all' || x.color === only)
-      .filter(x => !q || (x.text + ' ' + (x.note ?? '')).toLowerCase().includes(q))
+      .filter(x => !q || (x.text + ' ' + (x.note ?? '') + ' ' + (x.where ?? '')).toLowerCase().includes(q))
       .sort((a, b) => (all ? b.at - a.at : order.indexOf(a.requestId) - order.indexOf(b.requestId) || a.at - b.at))
-    const sketches = d.sketches.filter(s => all || s.session === here.session).sort((a, b) => b.at - a.at)
-    const Svg = e.surface === 'terminal' ? undefined : $.ui.resolve(e).Svg
-    const canSvg = Svg !== undefined
-    const { Input } = $.ui.resolve(e)
+    const sketches = d.sketches.filter(s => all || isMine(s)).sort((a, b) => b.at - a.at)
+    const notes = list.filter(x => x.note).length
 
     return (
       <Box flexDirection="column" gap="sm">
         {tabs}
-        <Input
-          key="search"
-          placeholder="Search highlights and notes"
-          value={q}
-          onInput={v => update($, query, () => v)}
-          onSubmit={v => update($, query, () => v)}
-        />
+        <Text dimColor>
+          {plural(list.length, 'highlight')} · {plural(notes, 'note')} · {plural(sketches.length, 'sketch')}
+          {all ? ' · all sessions' : ' · this session'}
+        </Text>
+        <Input key="search" placeholder="Search highlights, notes, #tags" value={q} onInput={x => update($, query, () => x)} onSubmit={x => update($, query, () => x)} />
         <Box flexDirection="row" gap="xs" flexWrap="wrap" alignItems="center">
           <Button key="f-all" label="All" variant={only === 'all' ? 'primary' : 'secondary'} onPress={() => update($, filter, () => 'all')} />
           {COLOR_NAMES.map(c => (
             <Button key={`f-${c}`} onPress={() => update($, filter, x => (x === c ? 'all' : c))}>
-              <Text backgroundColor={COLORS[c].bg} color={COLORS[c].fg}>
-                {only === c ? ` ✓ ${COLORS[c].label} ` : ` ${COLORS[c].label} `}
-              </Text>
+              <Text {...lookOf(c)}>{only === c ? ` ✓ ${COLORS[c].label} ` : ` ${COLORS[c].label} `}</Text>
             </Button>
           ))}
         </Box>
         <Box flexDirection="row" gap="sm" flexWrap="wrap">
           <Button key="scope" label={all ? 'Showing: all sessions' : 'Showing: this session'} dimColor onPress={() => update($, showAll, x => !x)} />
           <Button key="copy-md" label="Copy as Markdown" dimColor onPress={() => copyAll($, list)} />
-          {here.dir && cfg.writeFiles && <Button key="open-html" label="Open in browser" dimColor onPress={() => openFile($, `${here.dir}/index.html`)} />}
+          {here.dir && cfg.writeFiles && <Button key="open-html" label="Open notebook in browser" dimColor onPress={() => openFile($, `${here.dir}/index.html`)} />}
           {here.dir && cfg.writeFiles && <Button key="open-dir" label="Open folder" dimColor onPress={() => openFile($, here.dir)} />}
         </Box>
-        {m && (
-          <Text color={MARKER_COLOR}>📍 Marker on: {firstLine(texts.get(m) ?? '', width - 12)}</Text>
-        )}
+        {m && <Text color={MARKER_COLOR}>📍 Marker on: {firstLine(texts.get(m) ?? '', width - 12)}</Text>}
         {list.length === 0 && sketches.length === 0 && (
-          <Text dimColor>Nothing yet. Select text in a reply, then pick a colour above the prompt.</Text>
+          <Text dimColor>{q || only !== 'all' ? 'Nothing matches. Clear the search or the filter.' : 'Nothing yet. Select text in a reply, then pick a colour above the prompt.'}</Text>
         )}
         {list.map(hl => (
           <Box flexDirection="column" key={`row-${hl.id}`}>
-            <Text>
-              <Text backgroundColor={COLORS[hl.color].bg} color={COLORS[hl.color].fg}>
-                {short(hl.text, width * 2)}
+            {hl.context && (
+              <Text dimColor size="caption">
+                {all && hl.where ? `${hl.where} · ` : ''}from: {short(hl.context, width)}
               </Text>
+            )}
+            <Text>
+              <Text {...lookOf(hl.color)}>{short(hl.text, width * 2)}</Text>
             </Text>
             {hl.note && (
               <Text dimColor italic>
                 ✎ {hl.note}
               </Text>
             )}
-            {all && hl.where && <Text dimColor size="caption">{hl.where}</Text>}
             <Box flexDirection="row" gap="sm">
+              {texts.has(hl.requestId) && (
+                <Button
+                  key={`read-${hl.id}`}
+                  label="Read reply"
+                  dimColor
+                  onPress={async () => {
+                    await update($, focus, () => hl.requestId)
+                    await update($, view, () => 'reply')
+                  }}
+                />
+              )}
               <Button key={`note-${hl.id}`} label={hl.note ? 'Edit note' : 'Add note'} dimColor onPress={() => update($, noting, () => hl.id)} />
               <Button key={`del-${hl.id}`} label="Remove" dimColor onPress={() => removeHighlight($, hl)} />
             </Box>
           </Box>
         ))}
-        {sketches.map(s =>
-          canSvg ? (
-            <Box flexDirection="column" key={`sk-${s.id}`}>
-              {Svg && <Svg source={sketchSvg(s, { ink: '#57534e', paper: '#ffffff' })} alt="A sketch" width={Math.min(360, width * 7)} />}
-              <Button key={`skdel-${s.id}`} label="Remove sketch" dimColor onPress={() => save($, dd => ({ ...dd, sketches: dd.sketches.filter(x => x.id !== s.id) }))} />
-            </Box>
-          ) : (
-            <Text dimColor>✏️ Sketch saved {new Date(s.at).toISOString().slice(0, 16).replace('T', ' ')} (open the notebook to see it)</Text>
-          ),
-        )}
+        {sketches.map(s => (
+          <Box flexDirection="column" key={`psk-${s.id}`}>
+            {s.context && <Text dimColor size="caption">under: {short(s.context, width)}</Text>}
+            {Svg ? (
+              <Svg source={sketchSvg(s, { paper: '#ffffff' })} alt="A sketch" width={Math.min(360, width * 7)} />
+            ) : (
+              <Text dimColor>✏️ Sketch saved {new Date(s.at).toISOString().slice(0, 16).replace('T', ' ')} (open the notebook in a browser to see it)</Text>
+            )}
+            <Button key={`pskdel-${s.id}`} label="Remove sketch" dimColor onPress={() => removeSketch($, s.id)} />
+          </Box>
+        ))}
       </Box>
     )
   })
